@@ -1,0 +1,123 @@
+diff --git a/crates/cli-support/src/js/mod.rs b/crates/cli-support/src/js/mod.rs
+index f81d9813..df6ae7cd 100644
+--- a/crates/cli-support/src/js/mod.rs
++++ b/crates/cli-support/src/js/mod.rs
+@@ -2470,6 +2470,7 @@ impl<'a> Context<'a> {
+         }
+ 
+         self.export_destructor();
++        self.export_thread_counter();
+ 
+         Ok(())
+     }
+@@ -2483,6 +2484,15 @@ impl<'a> Context<'a> {
+         self.export_name_of(thread_destroy);
+     }
+ 
++    fn export_thread_counter(&mut self) {
++        let func = match self.aux.thread_counter {
++            Some(id) => id,
++            None => return,
++        };
++
++        self.export_name_of(func);
++    }
++
+     /// Registers import names for all `Global` imports first before we actually
+     /// process any adapters.
+     ///
+diff --git a/crates/cli-support/src/wit/mod.rs b/crates/cli-support/src/wit/mod.rs
+index bfb6c42b..662226b2 100644
+--- a/crates/cli-support/src/wit/mod.rs
++++ b/crates/cli-support/src/wit/mod.rs
+@@ -212,6 +212,7 @@ impl<'a> Context<'a> {
+         }
+ 
+         self.aux.thread_destroy = self.thread_destroy();
++        self.aux.thread_counter = self.thread_counter();
+ 
+         Ok(())
+     }
+@@ -1405,6 +1406,13 @@ impl<'a> Context<'a> {
+             .map(|p| p.1)
+     }
+ 
++    fn thread_counter(&self) -> Option<FunctionId> {
++        self.function_exports
++            .get("__wbindgen_thread_counter")
++            .cloned()
++            .map(|p| p.1)
++    }
++
+     fn memory(&self) -> Result<MemoryId, Error> {
+         self.memory
+             .ok_or_else(|| anyhow!("failed to find memory declaration in module"))
+diff --git a/crates/cli-support/src/wit/nonstandard.rs b/crates/cli-support/src/wit/nonstandard.rs
+index fe8142d0..6847c36c 100644
+--- a/crates/cli-support/src/wit/nonstandard.rs
++++ b/crates/cli-support/src/wit/nonstandard.rs
+@@ -59,6 +59,7 @@ pub struct WasmBindgenAux {
+     pub exn_store: Option<walrus::FunctionId>,
+     pub shadow_stack_pointer: Option<walrus::GlobalId>,
+     pub thread_destroy: Option<walrus::FunctionId>,
++    pub thread_counter: Option<walrus::FunctionId>,
+ }
+ 
+ pub type WasmBindgenAuxId = TypedCustomSectionId<WasmBindgenAux>;
+@@ -436,5 +437,8 @@ impl walrus::CustomSection for WasmBindgenAux {
+         if let Some(id) = self.thread_destroy {
+             roots.push_func(id);
+         }
++        if let Some(id) = self.thread_counter {
++            roots.push_func(id);
++        }
+     }
+ }
+diff --git a/crates/threads-xform/src/lib.rs b/crates/threads-xform/src/lib.rs
+index 326d6a29..0771551a 100644
+--- a/crates/threads-xform/src/lib.rs
++++ b/crates/threads-xform/src/lib.rs
+@@ -324,7 +324,7 @@ fn inject_start(
+     let local = module.locals.add(ValType::I32);
+     let thread_count = module.locals.add(ValType::I32);
+ 
+-    let malloc = find_function(module, "__wbindgen_malloc")?;
++    let malloc = find_function(module, "__wbindgen_tls_malloc")?;
+ 
+     let builder = wasm_bindgen_wasm_conventions::get_or_insert_start_builder(module);
+ 
+@@ -347,6 +347,8 @@ fn inject_start(
+                 with_temp_stack(body, memory, stack, |body| {
+                     body.i32_const(stack.size as i32)
+                         .i32_const(16)
++                        .i32_const(thread_counter_addr)
++                        .i32_const(1) // type 1 = Stack
+                         .call(malloc)
+                         .local_tee(local);
+                 });
+@@ -368,11 +370,25 @@ fn inject_start(
+     // Afterwards we need to initialize our thread-local state.
+     body.i32_const(tls.size as i32)
+         .i32_const(tls.align as i32)
++        .i32_const(thread_counter_addr)
++        .i32_const(0) // type 0 = TLS
+         .call(malloc)
+         .global_set(tls.base)
+         .global_get(tls.base)
+         .call(tls.init);
+ 
++    let thread_counter_id = {
++        let mut builder = walrus::FunctionBuilder::new(&mut module.types, &[], &[ValType::I32]);
++        builder.name("__wbindgen_thread_counter".into());
++        let mut body = builder.func_body();
++        body.i32_const(thread_counter_addr);
++        builder.finish(Vec::new(), &mut module.funcs)
++    };
++
++    module
++        .exports
++        .add("__wbindgen_thread_counter", thread_counter_id);
++
+     Ok(ThreadCount(thread_count))
+ }
+ 

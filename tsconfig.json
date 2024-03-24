@@ -1,0 +1,12 @@
+{
+	"compilerOptions": {
+		"allowSyntheticDefaultImports": true,
+		"esModuleInterop": true,
+		"noImplicitAny": true,
+		"declaration": true,
+		"module": "CommonJS",
+		"target": "ES2017",
+		"allowJs": true
+	},
+	"files": ["src/index.ts"]
+}

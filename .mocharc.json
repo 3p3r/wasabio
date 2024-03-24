@@ -1,0 +1,6 @@
+{
+	"timeout": "60000",
+	"ui": "bdd",
+	"node-option": ["loader=ts-node/esm", "no-warnings"],
+	"spec": ["test/*.test.ts", "test/**/*.test.ts"]
+}
