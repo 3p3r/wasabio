@@ -1,7 +1,11 @@
 {
 	"name": "wasabio",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "WebAssembly and SharedArrayBuffer IO. Pronounced 'wassabee-yo'.",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/3p3r/wasabio.git"
+	},
 	"main": "index.js",
 	"scripts": {
 		"test": "ts-mocha",
@@ -39,6 +43,7 @@
 		"exponential-backoff": "^3.1.1",
 		"mocha": "^10.3.0",
 		"prettier": "^3.2.5",
+		"process": "^0.11.10",
 		"string-replace-loader": "^3.1.0",
 		"terser-webpack-plugin": "^5.3.10",
 		"ts-loader": "^9.5.1",

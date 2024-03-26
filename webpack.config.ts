@@ -195,6 +195,7 @@ export default function (_env: unknown, { mode }: { mode: string }) {
 			}),
 			new webpack.ProvidePlugin({
 				Buffer: ["buffer", "Buffer"],
+				process: "process",
 			}),
 			new CopyPlugin({
 				patterns: [
@@ -252,6 +253,7 @@ export default function (_env: unknown, { mode }: { mode: string }) {
 			alias: {
 				assert: "assert",
 				buffer: "buffer",
+				process: "process",
 			},
 		},
 	};
