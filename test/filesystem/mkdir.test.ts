@@ -1,6 +1,6 @@
-import path from "path";
 import * as wasabio from "../../dist";
 import { assert } from "chai";
+import { dirname, join } from "path";
 
 declare global {
 	var WASABIO: typeof wasabio;
@@ -22,21 +22,21 @@ describe("fs.mkdir tests", () => {
 	});
 
 	it("should create directory with mode passed as an options object", () => {
-		const pathname = path.join(tmpdir, nextDir());
+		const pathname = join(tmpdir, nextDir());
 		fs.mkdirSync(pathname, { mode: 0o777 });
 		const exists = fs.existsSync(pathname);
 		assert.strictEqual(exists, true);
 	});
 
 	it("should create directory from given path", () => {
-		const pathname = path.join(tmpdir, nextDir());
+		const pathname = join(tmpdir, nextDir());
 		fs.mkdirSync(pathname);
 		const exists = fs.existsSync(pathname);
 		assert.strictEqual(exists, true);
 	});
 
 	it("should mkdirpSync when both top-level, and sub-folders do not exist", () => {
-		const pathname = path.join(tmpdir, nextDir(), nextDir());
+		const pathname = join(tmpdir, nextDir(), nextDir());
 		fs.mkdirSync(pathname, { recursive: true });
 		const exists = fs.existsSync(pathname);
 		assert.strictEqual(exists, true);
@@ -44,7 +44,7 @@ describe("fs.mkdir tests", () => {
 	});
 
 	it("should mkdirpSync when folder already exists", () => {
-		const pathname = path.join(tmpdir, nextDir(), nextDir());
+		const pathname = join(tmpdir, nextDir(), nextDir());
 
 		fs.mkdirSync(pathname, { recursive: true });
 		// Should not cause an error.
@@ -64,9 +64,9 @@ describe("fs.mkdir tests", () => {
 	});
 
 	it("should throw when path is a file", () => {
-		const pathname = path.join(tmpdir, nextDir(), nextDir());
+		const pathname = join(tmpdir, nextDir(), nextDir());
 
-		fs.mkdirSync(path.dirname(pathname));
+		fs.mkdirSync(dirname(pathname));
 		fs.writeFileSync(pathname, "", "utf8");
 
 		assert.throws(() => {
@@ -83,10 +83,10 @@ describe("fs.mkdir tests", () => {
 	});
 
 	it("should throw when part of the path is a file", () => {
-		const filename = path.join(tmpdir, nextDir(), nextDir());
-		const pathname = path.join(filename, nextDir(), nextDir());
+		const filename = join(tmpdir, nextDir(), nextDir());
+		const pathname = join(filename, nextDir(), nextDir());
 
-		fs.mkdirSync(path.dirname(filename));
+		fs.mkdirSync(dirname(filename));
 		fs.writeFileSync(filename, "", "utf8");
 
 		assert.throws(() => {
@@ -106,8 +106,8 @@ describe("fs.mkdir tests", () => {
 	it("should return first folder created, when all folders are new", () => {
 		const dir1 = nextDir();
 		const dir2 = nextDir();
-		const pathname = path.join(tmpdir, dir1, dir2);
-		fs.mkdirSync(path.join(tmpdir, dir1), { recursive: true });
+		const pathname = join(tmpdir, dir1, dir2);
+		fs.mkdirSync(join(tmpdir, dir1), { recursive: true });
 		const p = fs.mkdirSync(pathname, { recursive: true });
 		assert.strictEqual(fs.existsSync(pathname), true);
 		assert.strictEqual(fs.statSync(pathname)?.isDirectory?.(), true);
@@ -117,8 +117,8 @@ describe("fs.mkdir tests", () => {
 	it("should return first folder created, when last folder is new", () => {
 		const dir1 = nextDir();
 		const dir2 = nextDir();
-		const pathname = path.join(tmpdir, dir1, dir2);
-		fs.mkdirSync(path.join(tmpdir, dir1), { recursive: true });
+		const pathname = join(tmpdir, dir1, dir2);
+		fs.mkdirSync(join(tmpdir, dir1), { recursive: true });
 		const p = fs.mkdirSync(pathname, { recursive: true });
 		assert.strictEqual(fs.existsSync(pathname), true);
 		assert.strictEqual(fs.statSync(pathname)?.isDirectory?.(), true);
@@ -128,8 +128,8 @@ describe("fs.mkdir tests", () => {
 	it("should return undefined, when no new folders are created", () => {
 		const dir1 = nextDir();
 		const dir2 = nextDir();
-		const pathname = path.join(tmpdir, dir1, dir2);
-		fs.mkdirSync(path.join(tmpdir, dir1, dir2), { recursive: true });
+		const pathname = join(tmpdir, dir1, dir2);
+		fs.mkdirSync(join(tmpdir, dir1, dir2), { recursive: true });
 		const p = fs.mkdirSync(pathname, { recursive: true });
 		assert.strictEqual(fs.existsSync(pathname), true);
 		assert.strictEqual(fs.statSync(pathname)?.isDirectory?.(), true);
@@ -144,7 +144,7 @@ describe("fs.mkdir tests", () => {
 			const suffix = asString ? "str" : "num";
 			const input = asString ? (mode | maskToIgnore).toString(8) : mode | maskToIgnore;
 
-			const dir = path.join(tmpdir, `mkdirSync-${suffix}`);
+			const dir = join(tmpdir, `mkdirSync-${suffix}`);
 			fs.mkdirSync(dir, input);
 			const m = fs.statSync(dir)?.mode;
 			assert.isNumber(m);
@@ -165,18 +165,18 @@ describe("fs.mkdir tests", () => {
 			return accessErrorCode;
 		}
 
-		const dir = path.join(tmpdir, "mkdirp_readonly");
+		const dir = join(tmpdir, "mkdirp_readonly");
 		fs.mkdirSync(dir);
 		const codeExpected = makeDirectoryReadOnly(dir);
 		let err: any = null;
 		try {
-			fs.mkdirSync(path.join(dir, "/foo"), { recursive: true });
+			fs.mkdirSync(join(dir, "/foo"), { recursive: true });
 		} catch (_err) {
 			err = _err;
 		}
 		assert.isNotNull(err);
 		assert.strictEqual(err?.code, codeExpected);
-		assert.strictEqual(err.path, path.join(dir, "/foo"));
+		assert.strictEqual(err.path, join(dir, "/foo"));
 	});
 
 	after(() => {

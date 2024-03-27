@@ -1,6 +1,6 @@
-import path from "path";
 import * as wasabio from "../../dist";
 import { assert } from "chai";
+import { join } from "path";
 
 declare global {
 	var WASABIO: typeof wasabio;
@@ -10,7 +10,7 @@ const fs = globalThis.WASABIO !== undefined ? globalThis.WASABIO : wasabio;
 
 describe("fs.write tests", () => {
 	const tmpdir = "/tmp";
-	const fn = path.join(tmpdir, "write.txt");
+	const fn = join(tmpdir, "write.txt");
 
 	before(async () => {
 		if (!fs.available()) await fs.initialize();

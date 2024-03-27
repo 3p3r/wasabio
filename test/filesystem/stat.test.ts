@@ -1,6 +1,6 @@
-import path from "path";
 import * as wasabio from "../../dist";
 import { assert } from "chai";
+import { join } from "path";
 
 declare global {
 	var WASABIO: typeof wasabio;
@@ -15,7 +15,7 @@ describe("fs.stat and fs.lstat", () => {
 	before(async () => {
 		if (!fs.available()) await fs.initialize();
 		fs.mkdirSync(tmpdir);
-		fs.writeFileSync(path.join(tmpdir, __filename), "test");
+		fs.writeFileSync(join(tmpdir, __filename), "test");
 	});
 
 	it("should return stats with mtime as a Date and check for blksize and blocks", () => {
@@ -52,7 +52,7 @@ describe("fs.stat and fs.lstat", () => {
 	});
 
 	it("should return stats with correct types and values for properties", (done) => {
-		const s: any = fs.statSync(path.join(tmpdir, __filename));
+		const s: any = fs.statSync(join(tmpdir, __filename));
 
 		assert.strictEqual(s?.isDirectory?.(), false);
 		assert.strictEqual(s?.isFile?.(), true);

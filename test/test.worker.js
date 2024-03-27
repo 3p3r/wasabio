@@ -1,4 +1,4 @@
-import * as wasabio from "../dist";
+const wasabio = require("../dist");
 const { initialize, EventEmitter, mkdirSync } = wasabio || globalThis.WASABIO;
 globalThis.onmessage = ({ data }) => {
 	const { test, mem } = data;

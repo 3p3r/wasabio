@@ -31,7 +31,7 @@ jobs:
           path: |
             deps/wasi-sdk
             deps/emcc-sdk
-          key: ${{ runner.os }}-deps
+          key: ${{ runner.os }}-${{ github.event.repository.name }}-deps
       - name: build, lint, and test
         env:
           NODE_OPTIONS: "--max_old_space_size=4096"
@@ -44,4 +44,4 @@ jobs:
           path: |
             deps/wasi-sdk
             deps/emcc-sdk
-          key: ${{ runner.os }}-deps
+          key: ${{ runner.os }}-${{ github.event.repository.name }}-deps

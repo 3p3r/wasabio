@@ -1,6 +1,6 @@
-import path from "path";
 import * as wasabio from "../../dist";
 import { assert } from "chai";
+import { join } from "path";
 
 declare global {
 	var WASABIO: typeof wasabio;
@@ -17,7 +17,7 @@ describe("fs.utimes tests", () => {
 	});
 
 	it("should check for Y2K38 support", function () {
-		const testFilePath = path.join(tmpdir, "y2k38-test");
+		const testFilePath = join(tmpdir, "y2k38-test");
 		const testFileDate = new Date("2040-01-02");
 
 		fs.writeFileSync(testFilePath, "");
@@ -29,7 +29,7 @@ describe("fs.utimes tests", () => {
 	});
 
 	it("should test utimes precision", () => {
-		const testPath = path.join(tmpdir, "test-utimes-precision");
+		const testPath = join(tmpdir, "test-utimes-precision");
 		fs.writeFileSync(testPath, "");
 
 		const Y2K38_mtime = 2 ** 31;

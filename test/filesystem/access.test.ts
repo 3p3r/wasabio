@@ -1,6 +1,6 @@
-import path from "path";
 import * as wasabio from "../../dist";
 import { assert } from "chai";
+import { join } from "path";
 
 declare global {
 	var WASABIO: typeof wasabio;
@@ -10,9 +10,9 @@ const fs = globalThis.WASABIO !== undefined ? globalThis.WASABIO : wasabio;
 
 describe("fs.access tests", () => {
 	const tmpdir = "/tmp";
-	const doesNotExist = path.join(tmpdir, "__this_should_not_exist");
-	const readOnlyFile = path.join(tmpdir, "read_only_file");
-	const readWriteFile = path.join(tmpdir, "read_write_file");
+	const doesNotExist = join(tmpdir, "__this_should_not_exist");
+	const readOnlyFile = join(tmpdir, "read_only_file");
+	const readWriteFile = join(tmpdir, "read_write_file");
 
 	function createFileWithPerms(file: string, mode: number) {
 		fs.writeFileSync(file, "");

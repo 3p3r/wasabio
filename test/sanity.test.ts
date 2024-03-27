@@ -167,30 +167,31 @@ describe("sanity testing", () => {
 		mkdirSync("/test2");
 	});
 
+	function createWorker() {
+		// note: this gets replaced for browser testing, do not modify.
+		return new Worker("./test/test.worker.js", { type: "module" });
+	}
+
 	it("should be able to send and receive events between threads", function (done) {
-		// SharedArrayBuffer in browser needs COOP/COEP headers
-		this.skip(); // cannot get ESM to work with this repo..
-		// const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-		// const emitter = new EventEmitter("worker");
-		// emitter.once("test", (data) => {
-		// 	expect(data).to.equal("hello");
-		// 	worker.terminate();
-		// 	done();
-		// });
-		// worker.postMessage({ mem, test: "events" });
+		const worker = createWorker();
+		const emitter = new EventEmitter("worker");
+		emitter.once("test", (data) => {
+			expect(data).to.equal("hello");
+			worker.terminate();
+			done();
+		});
+		worker.postMessage({ mem, test: "events" });
 	});
 
 	it("should be able to catch filesystem events from a worker", function (done) {
-		// SharedArrayBuffer in browser needs COOP/COEP headers
-		this.skip(); // cannot get ESM to work with this repo..
-		// const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-		// const emitter = new EventEmitter("fs");
-		// emitter.once("mkdirSync", (data) => {
-		// 	expect(data).to.equal("/test3");
-		// 	worker.terminate();
-		// 	done();
-		// });
-		// worker.postMessage({ mem, test: "fs" });
+		const worker = createWorker();
+		const emitter = new EventEmitter("fs");
+		emitter.once("mkdirSync", (data) => {
+			expect(data).to.equal("/test3");
+			worker.terminate();
+			done();
+		});
+		worker.postMessage({ mem, test: "fs" });
 	});
 
 	it("should support a localStorage like api", () => {

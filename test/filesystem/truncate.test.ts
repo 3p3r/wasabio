@@ -1,6 +1,7 @@
-import path from "path";
 import * as wasabio from "../../dist";
+import { Buffer } from "buffer/";
 import { assert } from "chai";
+import { join } from "path";
 
 declare global {
 	var WASABIO: typeof wasabio;
@@ -10,7 +11,7 @@ const fs = globalThis.WASABIO !== undefined ? globalThis.WASABIO : wasabio;
 
 describe("fs.truncate tests", () => {
 	const tmpdir = "/tmp";
-	const filename = path.join(tmpdir, "truncate-file.txt");
+	const filename = join(tmpdir, "truncate-file.txt");
 	const data = Buffer.alloc(1024 * 16, "x");
 	let stat: any;
 

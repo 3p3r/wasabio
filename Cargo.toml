@@ -1,10 +1,10 @@
 [package]
 name = "wasabio"
 version = "1.0.0"
-authors = ["Zorse Developers"]
+authors = ["Sepehr Laal"]
 edition = "2018"
 description = "WebAssembly and SharedArrayBuffer IO. Pronounced 'wassabee-yo'."
-license = "zorse-proprietary"
+license = "MIT"
 repository = "https://github.com/3p3r/wasabio.git"
 
 [lib]

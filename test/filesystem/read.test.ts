@@ -1,6 +1,7 @@
-import path from "path";
 import * as wasabio from "../../dist";
+import { Buffer } from "buffer/";
 import { assert } from "chai";
+import { join } from "path";
 
 declare global {
 	var WASABIO: typeof wasabio;
@@ -11,7 +12,7 @@ const fs = globalThis.WASABIO !== undefined ? globalThis.WASABIO : wasabio;
 describe("fs.read tests", () => {
 	let fd: number;
 	const tmpdir = "/tmp";
-	const filepath = path.join(tmpdir, "x.txt");
+	const filepath = join(tmpdir, "x.txt");
 	const expected = Buffer.from("xyz\n");
 
 	function test(bufferSync: Buffer | Uint8Array, expected: Buffer | Uint8Array) {

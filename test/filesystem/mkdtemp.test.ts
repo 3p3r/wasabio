@@ -1,6 +1,7 @@
-import path from "path";
 import * as wasabio from "../../dist";
+import { Buffer } from "buffer/";
 import { assert } from "chai";
+import { basename, join } from "path";
 
 declare global {
 	var WASABIO: typeof wasabio;
@@ -17,15 +18,15 @@ describe("fs.mkdtemp tests", () => {
 	});
 
 	it("should create basic tempdir", () => {
-		const tmpFolder = fs.mkdtempSync(path.join(tmpdir, "foo."));
+		const tmpFolder = fs.mkdtempSync(join(tmpdir, "foo."));
 
-		assert.strictEqual(path.basename(tmpFolder).length, "foo.XXXXXX".length);
+		assert.strictEqual(basename(tmpFolder).length, "foo.XXXXXX".length);
 		assert(fs.existsSync(tmpFolder));
 	});
 
 	it("should support utf8 in tempdir", () => {
-		const utf8 = fs.mkdtempSync(path.join(tmpdir, "\u0222abc."));
-		assert.strictEqual(Buffer.byteLength(path.basename(utf8)), Buffer.byteLength("\u0222abc.XXXXXX"));
+		const utf8 = fs.mkdtempSync(join(tmpdir, "\u0222abc."));
+		assert.strictEqual(Buffer.byteLength(basename(utf8)), Buffer.byteLength("\u0222abc.XXXXXX"));
 		assert(fs.existsSync(utf8));
 	});
 
