@@ -24,6 +24,10 @@ import { ok } from "assert";
 import atob from "atob-lite";
 import type * as fs from "fs";
 import { backOff } from "exponential-backoff";
+import JSZip from "jszip";
+
+import { checksum, commit, built } from "../pkg/package.json";
+const METADATA = { checksum, commit, built };
 
 export interface Storage {
 	setItem(key: string, value: string): void;
@@ -37,6 +41,8 @@ export interface Storage {
 const INCORRECT_KEY_TYPE_ERROR_MESSAGE = "Incorrect key type. Expected a string.";
 const INCORRECT_VAL_TYPE_ERROR_MESSAGE = "Incorrect value type. Expected a string.";
 const INCORRECT_INDEX_TYPE_ERROR_MESSAGE = "Incorrect index type. Expected a number.";
+const OBJECT_STORE_NAME = "memory";
+const METADATA_NAME = "meta";
 
 class LocalStorage implements Storage {
 	setItem(key: string, value: string): void {
@@ -125,6 +131,14 @@ export function serialize(memory: WebAssembly.Memory): Uint8Array {
 	return data;
 }
 
+export async function compress(buffer: Uint8Array): Promise<Uint8Array> {
+	const zip = new JSZip();
+	zip.file(OBJECT_STORE_NAME, buffer, { compression: "DEFLATE" });
+	zip.file(METADATA_NAME, JSON.stringify(METADATA), { compression: "DEFLATE" });
+	const zipBuffer = await zip.generateAsync({ type: "uint8array" });
+	return zipBuffer;
+}
+
 export function deserialize(buffer: Uint8Array): WebAssembly.Memory {
 	const memory = new WebAssembly.Memory({ initial: 18, maximum: 16384, shared: true });
 	while (memory.buffer.byteLength < buffer.byteLength) memory.grow(1);
@@ -133,13 +147,27 @@ export function deserialize(buffer: Uint8Array): WebAssembly.Memory {
 	return memory;
 }
 
+export async function decompress(buffer: Uint8Array): Promise<Uint8Array> {
+	const zip = await JSZip.loadAsync(buffer);
+	const zipBuffer = await zip.file(OBJECT_STORE_NAME)?.async("uint8array");
+	const metadata = await zip.file(METADATA_NAME)?.async("string");
+	ok(metadata, "no metadata");
+	const { checksum, commit, built } = JSON.parse(metadata);
+	ok(checksum, "no checksum");
+	if (checksum === METADATA.checksum) {
+		return zipBuffer;
+	} else {
+		throw new Error(`${checksum} != ${METADATA.checksum} (${commit}@${built})`);
+	}
+}
+
 export function available(): boolean {
 	return MEMORY !== undefined;
 }
 
 export function diagnostics(): void {
 	if (MEMORY) wasabio_diag();
-	else console.log("[WASABIO:LIB] wasabio has not been initialized.");
+	else throw new Error("not initialized");
 }
 
 function decodeWasmFromBase64String(encoded: string) {

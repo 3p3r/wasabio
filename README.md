@@ -2,6 +2,14 @@
 
 WebAssembly and SharedArrayBuffer IO. Pronounced "wassabee-yo".
 
+- [Purpose](#purpose)
+- [Usage](#usage)
+  - [API](#api)
+  - [Initialization](#initialization)
+    - [From New Memory](#from-new-memory)
+    - [From Existing Memory](#from-existing-memory)
+  - [Webpack Plugin](#webpack-plugin)
+
 ## Purpose
 
 `wasabio` offers several utility APIs with familiar interfaces, and implemented
@@ -51,6 +59,10 @@ available(): boolean;
 serialize(memory: WebAssembly.Memory): Uint8Array;
 // deserializes buffer to memory, sets the correct buffer size
 deserialize(buffer: Uint8Array): WebAssembly.Memory;
+// compresses serialized wasabio memory buffer into a zip buffer
+compress(buffer: Uint8Array): Promise<Uint8Array>
+// decompresses zip buffer into serialized wasabio memory buffer
+decompress(buffer: Uint8Array): Promise<Uint8Array>
 ```
 
 ### Initialization
@@ -102,3 +114,12 @@ addEventListener("message", async ({ data }) => {
 
 In this case, `reboot` signifies that the library is being initialized from cold
 storage and thread-local state should be reset.
+
+### Webpack Plugin
+
+A Webpack plugin is provided to allow for seamless integration of `wasabio` into
+any project. The plugin currently supports generating a WASM memory that can be
+used to boot the library on the main thread with.
+
+If you are not interested in using the Webpack plugin, you may opt out of its
+dependencies being installed by using `npm install wasabio --omit=optional`.
