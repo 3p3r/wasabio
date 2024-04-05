@@ -106,7 +106,7 @@ fn disk() -> *mut lfs::lfs_t {
         guard!(LFS_SYS_INIT_LOCK);
         if unsafe { !INITIALIZED } {
             INIT.call_once(|| unsafe {
-                let sizeMB = 10; // 10MB of in-memory storage. Cannot be resized.
+                let sizeMB = 256; // 256MB of in-memory storage. Cannot be resized.
                 lfs::lfs_sys_mount(sizeMB, Some(lock), Some(unlock));
                 let root = "/";
                 let c_root = CString::new(root).unwrap();
