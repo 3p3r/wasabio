@@ -1,0 +1,15 @@
+diff --git a/node_modules/memfs/lib/volume.js b/node_modules/memfs/lib/volume.js
+index 5cd61c3..ef2ca14 100644
+--- a/node_modules/memfs/lib/volume.js
++++ b/node_modules/memfs/lib/volume.js
+@@ -1675,7 +1675,9 @@ FsReadStream.prototype._read = function (n) {
+             }
+             self.emit('error', er);
+         }
+-        else {
++        else if (thisPool.byteLength === 0) {
++            self.push(null);
++        } else  {
+             var b = null;
+             if (bytesRead > 0) {
+                 self.bytesRead += bytesRead;

@@ -8,6 +8,7 @@
 	},
 	"main": "index.js",
 	"scripts": {
+		"postinstall": "patch-package",
 		"test": "ts-mocha && karma start --single-run",
 		"lint": "prettier --check .",
 		"cosmo": "prettier --write .",
@@ -56,6 +57,7 @@
 		"karma-webpack": "^5.0.1",
 		"memfs": "^4.8.1",
 		"mocha": "^10.3.0",
+		"patch-package": "^8.0.0",
 		"path-browserify": "^1.0.1",
 		"prettier": "^3.2.5",
 		"process": "^0.11.10",

@@ -21,15 +21,15 @@ import init, {
 import WASM_BASE64 from "../pkg/wasabio_bg.wasm";
 import type { EventEmitter as IEventEmitter } from "events"; // type only!
 import type { Readable, Writable } from "stream";
-import { ok } from "assert";
-import atob from "atob-lite";
 import * as fs from "fs";
+import JSZip from "jszip";
+import atob from "atob-lite";
+import toBuffer from "typedarray-to-buffer";
+import { ok } from "assert";
 import { Volume } from "memfs/lib/volume";
 import { backOff } from "exponential-backoff";
 import { callbackify } from "util";
-import JSZip from "jszip";
 
-import toBuffer from "typedarray-to-buffer";
 const toUInt8 = (buf: any): Uint8Array =>
 	buf instanceof ArrayBuffer
 		? new Uint8Array(buf)
