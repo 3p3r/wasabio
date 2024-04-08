@@ -1,6 +1,6 @@
 {
 	"name": "wasabio",
-	"version": "1.1.0",
+	"version": "1.2.0",
 	"description": "WebAssembly and SharedArrayBuffer IO. Pronounced 'wassabee-yo'.",
 	"repository": {
 		"type": "git",
