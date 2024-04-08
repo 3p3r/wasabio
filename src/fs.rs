@@ -173,6 +173,7 @@ pub unsafe fn openSync(
         return Ok(fd);
     } else {
         let err: JsValue = JsError::new("ENOENT: no such file or directory").into();
+        Reflect::set(&err, &"path".into(), &path.into()).unwrap();
         Reflect::set(&err, &"code".into(), &"ENOENT".into()).unwrap();
         Reflect::set(&err, &"syscall".into(), &"open".into()).unwrap();
         return Err(err);
@@ -378,6 +379,7 @@ pub unsafe fn readdirSync(
 ) -> Result<JsValue, JsValue> {
     if !existsSync(path.clone()) {
         let err: JsValue = JsError::new("ENOENT: no such file or directory").into();
+        Reflect::set(&err, &"path".into(), &path.into()).unwrap();
         Reflect::set(&err, &"code".into(), &"ENOENT".into()).unwrap();
         Reflect::set(&err, &"syscall".into(), &"readdir".into()).unwrap();
         return Err(err);
@@ -501,6 +503,7 @@ pub unsafe fn readFileSync(
         .to_lowercase();
     if !existsSync(path.clone()) {
         let err: JsValue = JsError::new("ENOENT: no such file or directory").into();
+        Reflect::set(&err, &"path".into(), &path.into()).unwrap();
         Reflect::set(&err, &"code".into(), &"ENOENT".into()).unwrap();
         Reflect::set(&err, &"syscall".into(), &"open".into()).unwrap();
         return Err(err);
@@ -514,7 +517,13 @@ pub unsafe fn readFileSync(
     broadcast!(name_of!(readFileSync), path);
     let data = lfs::read_file_sync(path.as_str()).unwrap();
     let out = match encoding.as_str() {
-        "utf8" | "utf-8" => JsValue::from(String::from_utf8(data).unwrap()),
+        "utf8" | "utf-8" => {
+            if String::from_utf8(data.clone()).is_ok() {
+                JsValue::from(String::from_utf8(data).unwrap())
+            } else {
+                JsValue::from(js_sys::Uint8Array::from(data.as_slice()))
+            }
+        }
         "buffer" => JsValue::from(js_sys::Uint8Array::from(data.as_slice())),
         _ => return Err(JsError::new("unsupported encoding").into()),
     };
@@ -733,6 +742,7 @@ pub unsafe fn statSync(
     if !existsSync(path.clone()) {
         if throw_if_no_entry {
             let err: JsValue = JsError::new("ENOENT: no such file or directory").into();
+            Reflect::set(&err, &"path".into(), &path.into()).unwrap();
             Reflect::set(&err, &"code".into(), &"ENOENT".into()).unwrap();
             Reflect::set(&err, &"syscall".into(), &"stat".into()).unwrap();
             return Err(err);
@@ -801,6 +811,7 @@ pub unsafe fn lstatSync(
     if !existsSync(path.clone()) {
         if throw_if_no_entry {
             let err: JsValue = JsError::new("ENOENT: no such file or directory").into();
+            Reflect::set(&err, &"path".into(), &path.into()).unwrap();
             Reflect::set(&err, &"code".into(), &"ENOENT".into()).unwrap();
             Reflect::set(&err, &"syscall".into(), &"lstat".into()).unwrap();
             return Err(err);

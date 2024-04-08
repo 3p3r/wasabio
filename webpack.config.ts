@@ -198,6 +198,7 @@ export default [
 				new webpack.ProvidePlugin({
 					Buffer: ["buffer", "Buffer"],
 					process: "process",
+					URL: ["url", "URL"],
 				}),
 				new CopyPlugin({
 					patterns: [
@@ -252,6 +253,12 @@ export default [
 			},
 			resolve: {
 				extensions: [".tsx", ".ts", ".jsx", ".js", ".json"],
+				fallback: {
+					fs: false,
+					url: require.resolve("url/"),
+					path: require.resolve("path-browserify"),
+					stream: require.resolve("stream-browserify"),
+				},
 				alias: {
 					assert: "assert",
 					buffer: "buffer",

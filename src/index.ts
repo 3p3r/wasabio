@@ -20,11 +20,24 @@ import init, {
 // @ts-ignore - handled by webpack, turns into base64
 import WASM_BASE64 from "../pkg/wasabio_bg.wasm";
 import type { EventEmitter as IEventEmitter } from "events"; // type only!
+import type { Readable, Writable } from "stream";
 import { ok } from "assert";
 import atob from "atob-lite";
-import type * as fs from "fs";
+import * as fs from "fs";
+import { Volume } from "memfs/lib/volume";
 import { backOff } from "exponential-backoff";
+import { callbackify } from "util";
 import JSZip from "jszip";
+
+import toBuffer from "typedarray-to-buffer";
+const toUInt8 = (buf: any): Uint8Array =>
+	buf instanceof ArrayBuffer
+		? new Uint8Array(buf)
+		: ArrayBuffer.isView(buf)
+			? buf instanceof Uint8Array && buf.constructor.name === Uint8Array.name
+				? buf
+				: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+			: new TextEncoder().encode(buf);
 
 import { checksum, commit, built } from "../pkg/package.json";
 const METADATA = { checksum, commit, built };
@@ -95,6 +108,10 @@ export interface InitializeOptions {
 
 let MEMORY: WebAssembly.Memory | undefined;
 let THREAD_COUNTER_ADDRESS: number | undefined;
+
+export function memory(): WebAssembly.Memory | undefined {
+	return MEMORY;
+}
 
 export function initialize(
 	mem?: WebAssembly.Memory | Uint8Array,
@@ -594,7 +611,7 @@ export { mkdtempSync };
 import { writeFileSync as _writeFileSync } from "../pkg";
 export function writeFileSync(
 	pathOrFd: fs.PathLike | number,
-	data: Uint8Array | string,
+	data: Buffer | Uint8Array | string,
 	options?: object | encoding,
 ): void {
 	if (typeof options === "string") {
@@ -603,11 +620,11 @@ export function writeFileSync(
 	if (typeof pathOrFd === "number") {
 		throw new Error("not implemented, use writeSync");
 	} else {
-		_writeFileSync(normalizePathLikeToString(pathOrFd), data, options);
+		_writeFileSync(normalizePathLikeToString(pathOrFd), toUInt8(data), options);
 	}
 }
 import { readFileSync as _readFileSync } from "../pkg";
-export function readFileSync(pathOrFd: fs.PathLike | number, options?: object | encoding): Uint8Array | string {
+export function readFileSync(pathOrFd: fs.PathLike | number, options?: object | encoding): Buffer | string {
 	if (typeof options === "string") {
 		options = { encoding: options };
 	}
@@ -615,13 +632,14 @@ export function readFileSync(pathOrFd: fs.PathLike | number, options?: object | 
 		throw new Error("not implemented, use readSync");
 	} else {
 		pathOrFd = normalizePathLikeToString(pathOrFd);
-		return _readFileSync(pathOrFd, options);
+		const content = _readFileSync(pathOrFd, options);
+		return typeof content === "string" ? content : toBuffer(content);
 	}
 }
 import { appendFileSync as _appendFileSync } from "../pkg";
 export function appendFileSync(
 	pathOrFd: fs.PathLike | number,
-	data: Uint8Array | string,
+	data: Buffer | Uint8Array | string,
 	options?: object | encoding,
 ): void {
 	if (typeof options === "string") {
@@ -631,7 +649,7 @@ export function appendFileSync(
 		throw new Error("not implemented, use appendSync");
 	} else {
 		pathOrFd = normalizePathLikeToString(pathOrFd);
-		_appendFileSync(pathOrFd, data, options);
+		_appendFileSync(pathOrFd, toUInt8(data), options);
 	}
 }
 import { statfsSync } from "../pkg";
@@ -733,171 +751,119 @@ const delayedBackOff = async <T>(fn: () => Promise<T>): Promise<T> => {
 	return await backOff(fn, backOffOpts);
 };
 
+function promisify<T extends (...args: any[]) => any>(fn: T): (...args: Parameters<T>) => Promise<ReturnType<T>> {
+	return (...args: Parameters<T>) => {
+		return delayedBackOff(() => fn(...args));
+	};
+}
+
 /**
- * note: if you are accessing the filesystem in webworker, you can use either
+ * note: if you are accessing the filesystem in a webworker, you can use either
  * sync or async versions of the functions. if you are accessing the filesystem
- * in the main thread or another UI context (webview extensions), you must use
+ * on the main thread or another UI context (webview extensions), you must use
  * the async versions of the functions. this is because the sync versions of
  * the functions will block the main thread and cause the UI to freeze.
+ *
  * async version simply backs off exponentially until the operation succeeds.
+ *
+ * callback versions are just wrappers around the async versions.
  */
+
 export namespace promises {
-	export async function link(existing: string, path: string): Promise<any> {
-		return await delayedBackOff(async () => linkSync(existing, path));
-	}
-	export async function symlink(target: string, path: string): Promise<any> {
-		return await delayedBackOff(async () => symlinkSync(target, path));
-	}
-	export async function open(path: fs.PathLike, flags?: fs.OpenMode, mode?: fs.Mode): Promise<number> {
-		return await delayedBackOff(async () => openSync(path, flags, mode));
-	}
-	export async function opendir(path: string): Promise<number> {
-		return await delayedBackOff(async () => opendirSync(path));
-	}
-	export async function openfile(path: string, flags?: string, mode?: string | number): Promise<number> {
-		return await delayedBackOff(async () => openfileSync(path, flags, mode));
-	}
-	export async function close(fd: number): Promise<void> {
-		return await delayedBackOff(async () => closeSync(fd));
-	}
-	export async function lseek(fd: number, offset: number, whence: number): Promise<number> {
-		return await delayedBackOff(async () => lseekSync(fd, offset, whence));
-	}
-	export async function read(
-		fd: number,
-		buffer: Uint8Array,
-		offset?: number,
-		length?: number,
-		position?: number,
-	): Promise<number> {
-		return await delayedBackOff(async () => readSync(fd, buffer, offset, length, position));
-	}
-	export async function write(
-		fd: number,
-		buffer: Uint8Array,
-		offset?: number,
-		length?: number,
-		position?: number,
-	): Promise<number> {
-		return await delayedBackOff(async () => writeSync(fd, buffer, offset, length, position));
-	}
-	export async function fstat(fd: number): Promise<Partial<fs.StatsFs> | undefined> {
-		return await delayedBackOff(async () => fstatSync(fd));
-	}
-	export async function fchmod(fd: number, mode: string | number): Promise<void> {
-		return await delayedBackOff(async () => fchmodSync(fd, mode));
-	}
-	export async function fchown(fd: number, uid: number, gid: number): Promise<void> {
-		return await delayedBackOff(async () => fchownSync(fd, uid, gid));
-	}
-	export async function ftruncate(fd: number, len?: number): Promise<void> {
-		return await delayedBackOff(async () => ftruncateSync(fd, len));
-	}
-	export async function futimes(fd: number, atime: number, mtime: number): Promise<void> {
-		return await delayedBackOff(async () => futimesSync(fd, atime, mtime));
-	}
-	export async function fsync(fd: number): Promise<void> {
-		return await delayedBackOff(async () => fsyncSync(fd));
-	}
-	export async function fdatasync(fd: number): Promise<void> {
-		return await delayedBackOff(async () => fdatasyncSync(fd));
-	}
-	export async function exists(path: fs.PathLike): Promise<boolean> {
-		return await delayedBackOff(async () => existsSync(path));
-	}
-	export async function freaddir(fd: number): Promise<fs.Dirent | undefined> {
-		return await delayedBackOff(async () => freaddirSync(fd));
-	}
-	export async function readdir(
-		path: fs.PathLike,
-		options?: { withFileTypes?: boolean; recursive?: boolean | undefined },
-	): Promise<fs.Dirent[] | string[]> {
-		return await delayedBackOff(async () => readdirSync(path, options));
-	}
-	export async function mkdir(path: fs.PathLike, options?: fs.MakeDirectoryOptions | string | number): Promise<any> {
-		return await delayedBackOff(async () => mkdirSync(path, options));
-	}
-	export async function mkdtemp(prefix: string): Promise<string> {
-		return await delayedBackOff(async () => mkdtempSync(prefix));
-	}
-	export async function writeFile(
-		pathOrFd: fs.PathLike | number,
-		data: Uint8Array | string,
-		options?: object | encoding,
-	): Promise<void> {
-		return await delayedBackOff(async () => writeFileSync(pathOrFd, data, options));
-	}
-	export async function readFile(
-		pathOrFd: fs.PathLike | number,
-		options?: object | encoding,
-	): Promise<string | Uint8Array> {
-		return await delayedBackOff(async () => readFileSync(pathOrFd, options));
-	}
-	export async function appendFile(
-		pathOrFd: fs.PathLike | number,
-		data: Uint8Array | string,
-		options?: object | encoding,
-	): Promise<void> {
-		return await delayedBackOff(async () => appendFileSync(pathOrFd, data, options));
-	}
-	export async function statfs(path: string, dump?: boolean): Promise<fs.StatsFs> {
-		return await delayedBackOff(async () => moveStatFsToJsMemory(statfsSync(path, dump)));
-	}
-	export async function chmod(path: fs.PathLike, mode: fs.Mode): Promise<void> {
-		return await delayedBackOff(async () => chmodSync(path, mode));
-	}
-	export async function chown(path: fs.PathLike, uid: number, gid: number): Promise<void> {
-		return await delayedBackOff(async () => chownSync(path, uid, gid));
-	}
-	export async function truncate(pathOrFd: fs.PathLike | number, len?: number): Promise<void> {
-		return await delayedBackOff(async () => truncateSync(pathOrFd, len));
-	}
-	export async function utimes(path: fs.PathLike, atime: fs.TimeLike, mtime: fs.TimeLike): Promise<void> {
-		return await delayedBackOff(async () => utimesSync(path, atime, mtime));
-	}
-	export async function unlink(path: fs.PathLike): Promise<any> {
-		return await delayedBackOff(async () => unlinkSync(path));
-	}
-	export async function rename(old_path: fs.PathLike, new_path: fs.PathLike): Promise<void> {
-		return await delayedBackOff(async () => renameSync(old_path, new_path));
-	}
-	export async function copyFile(src: string, dest: string, options?: object | undefined): Promise<any> {
-		return await delayedBackOff(async () => copyFileSync(src, dest, options));
-	}
-	export async function rmdir(path: string): Promise<void> {
-		return await delayedBackOff(async () => rmdirSync(path));
-	}
-	export async function rm(path: string, options?: object | undefined): Promise<void> {
-		return await delayedBackOff(async () => rmSync(path, options));
-	}
-	export async function access(path: fs.PathLike, mode?: number): Promise<void> {
-		return await delayedBackOff(async () => accessSync(path, mode));
-	}
-	export async function realpath(path: string): Promise<string> {
-		return await delayedBackOff(async () => realpathSync(path));
-	}
-	export async function readlink(path: string): Promise<any> {
-		return await delayedBackOff(async () => readlinkSync(path));
-	}
-	export async function stat(
-		path: fs.PathLike,
-		options?: { throwIfNoEntry: boolean },
-	): Promise<Partial<fs.StatsFs> | undefined> {
-		return await delayedBackOff(async () => statSync(path, options));
-	}
-	export async function lchmod(path: fs.PathLike, mode: fs.Mode): Promise<void> {
-		return await delayedBackOff(async () => lchmodSync(path, mode));
-	}
-	export async function lchown(path: fs.PathLike, uid: number, gid: number): Promise<void> {
-		return await delayedBackOff(async () => lchownSync(path, uid, gid));
-	}
-	export async function lutimes(path: fs.PathLike, atime: fs.TimeLike, mtime: fs.TimeLike): Promise<void> {
-		return await delayedBackOff(async () => lutimesSync(path, atime, mtime));
-	}
-	export async function lstat(
-		path: fs.PathLike,
-		options?: { bigint: boolean },
-	): Promise<Partial<fs.StatsFs> | undefined> {
-		return await delayedBackOff(async () => lstatSync(path, options));
-	}
+	export const link = promisify(linkSync);
+	export const symlink = promisify(symlinkSync);
+	export const open = promisify(openSync);
+	export const opendir = promisify(opendirSync);
+	export const openfile = promisify(openfileSync);
+	export const close = promisify(closeSync);
+	export const lseek = promisify(lseekSync);
+	export const read = promisify(readSync);
+	export const write = promisify(writeSync);
+	export const fstat = promisify(fstatSync);
+	export const fchmod = promisify(fchmodSync);
+	export const fchown = promisify(fchownSync);
+	export const ftruncate = promisify(ftruncateSync);
+	export const futimes = promisify(futimesSync);
+	export const fsync = promisify(fsyncSync);
+	export const fdatasync = promisify(fdatasyncSync);
+	export const exists = promisify(existsSync);
+	export const freaddir = promisify(freaddirSync);
+	export const readdir = promisify(readdirSync);
+	export const mkdir = promisify(mkdirSync);
+	export const mkdtemp = promisify(mkdtempSync);
+	export const writeFile = promisify(writeFileSync);
+	export const readFile = promisify(readFileSync);
+	export const appendFile = promisify(appendFileSync);
+	export const statfs = promisify(statfsSync);
+	export const chmod = promisify(chmodSync);
+	export const chown = promisify(chownSync);
+	export const truncate = promisify(truncateSync);
+	export const utimes = promisify(utimesSync);
+	export const unlink = promisify(unlinkSync);
+	export const rename = promisify(renameSync);
+	export const copyFile = promisify(copyFileSync);
+	export const rmdir = promisify(rmdirSync);
+	export const rm = promisify(rmSync);
+	export const access = promisify(accessSync);
+	export const realpath = promisify(realpathSync);
+	export const readlink = promisify(readlinkSync);
+	export const stat = promisify(statSync);
+	export const lchmod = promisify(lchmodSync);
+	export const lchown = promisify(lchownSync);
+	export const lutimes = promisify(lutimesSync);
+	export const lstat = promisify(lstatSync);
+}
+
+export const link = callbackify(promises.link);
+export const symlink = callbackify(promises.symlink);
+export const open = callbackify(promises.open);
+export const opendir = callbackify(promises.opendir);
+export const openfile = callbackify(promises.openfile);
+export const close = callbackify(promises.close);
+export const lseek = callbackify(promises.lseek);
+export const read = callbackify(promises.read);
+export const write = callbackify(promises.write);
+export const fstat = callbackify(promises.fstat);
+export const fchmod = callbackify(promises.fchmod);
+export const fchown = callbackify(promises.fchown);
+export const ftruncate = callbackify(promises.ftruncate);
+export const futimes = callbackify(promises.futimes);
+export const fsync = callbackify(promises.fsync);
+export const fdatasync = callbackify(promises.fdatasync);
+export const exists = callbackify(promises.exists);
+export const freaddir = callbackify(promises.freaddir);
+export const readdir = callbackify(promises.readdir);
+export const mkdir = callbackify(promises.mkdir);
+export const mkdtemp = callbackify(promises.mkdtemp);
+export const writeFile = callbackify(promises.writeFile);
+export const readFile = callbackify(promises.readFile);
+export const appendFile = callbackify(promises.appendFile);
+export const statfs = callbackify(promises.statfs);
+export const chmod = callbackify(promises.chmod);
+export const chown = callbackify(promises.chown);
+export const truncate = callbackify(promises.truncate);
+export const utimes = callbackify(promises.utimes);
+export const unlink = callbackify(promises.unlink);
+export const rename = callbackify(promises.rename);
+export const copyFile = callbackify(promises.copyFile);
+export const rmdir = callbackify(promises.rmdir);
+export const rm = callbackify(promises.rm);
+export const access = callbackify(promises.access);
+export const realpath = callbackify(promises.realpath);
+export const readlink = callbackify(promises.readlink);
+export const stat = callbackify(promises.stat);
+export const lchmod = callbackify(promises.lchmod);
+export const lchown = callbackify(promises.lchown);
+export const lutimes = callbackify(promises.lutimes);
+export const lstat = callbackify(promises.lstat);
+
+const emptyVolume = new Volume();
+
+export function createReadStream(path: fs.PathLike, options?: string | object): Readable {
+	const _opts = typeof options === "string" ? { encoding: options } : options || {};
+	return new emptyVolume.ReadStream.prototype.__proto__.constructor({ open, read, close }, path, _opts) as Readable;
+}
+export function createWriteStream(path: fs.PathLike, options?: string | object): Writable {
+	const _opts = typeof options === "string" ? { encoding: options } : options || {};
+	return new emptyVolume.WriteStream.prototype.__proto__.constructor({ open, write, close }, path, _opts) as Writable;
 }

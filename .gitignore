@@ -130,6 +130,7 @@ dist
 .pnp.*
 
 # generated files
+src/index.js
 target
 deps
 pkg
