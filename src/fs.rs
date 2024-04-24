@@ -31,10 +31,9 @@ pub unsafe fn sab_fs_locked() -> bool {
 struct ChangeType {}
 
 impl ChangeType {
-    const CREATE: &'static str = "create";
     const CHANGE: &'static str = "change";
     const RENAME: &'static str = "rename";
-    const DELETE: &'static str = "delete";
+    const WATCH_: &'static str = "watch_";
 }
 
 fn parse_filesystem_mode(mode: String) -> i32 {
@@ -82,9 +81,9 @@ macro_rules! debug_log {
 	};
 }
 
-macro_rules! broadcast {
+macro_rules! broadcast_defer {
     ($name:expr, $($arg:expr),*) => {
-				debug_log!($name, $($arg),*);
+		debug_log!($name, $($arg),*);
         let ev = json!([ $($arg),* ]);
         defr!(unsafe {
             EMITTER
@@ -94,19 +93,36 @@ macro_rules! broadcast {
     };
 }
 
+macro_rules! broadcast_watch {
+    ($path:expr) => {
+        let prevStat = lfs::stat_sync($path.as_str());
+        defr!(unsafe {
+            let currStat = lfs::stat_sync($path.as_str());
+            let ev = json!([$path.to_string(), prevStat, currStat]);
+            EMITTER
+                .emit(ChangeType::WATCH_.to_string(), ev.to_string())
+                .unwrap_or(());
+        });
+    };
+}
+
 #[wasm_bindgen]
 pub fn linkSync(existing: String, path: String) -> Result<JsValue, JsValue> {
-    broadcast!(name_of!(linkSync), existing, path);
-    broadcast!(ChangeType::CREATE, path);
-    broadcast!(ChangeType::CHANGE, existing);
+    broadcast_watch!(path);
+    broadcast_watch!(existing);
+    broadcast_defer!(ChangeType::RENAME, path);
+    broadcast_defer!(ChangeType::CHANGE, existing);
+    broadcast_defer!(name_of!(linkSync), existing, path);
     lfs::link_sync(existing.as_str(), path.as_str())
 }
 
 #[wasm_bindgen]
 pub fn symlinkSync(target: String, path: String) -> Result<JsValue, JsValue> {
-    broadcast!(name_of!(symlinkSync), target, path);
-    broadcast!(ChangeType::CREATE, path);
-    broadcast!(ChangeType::CHANGE, target);
+    broadcast_watch!(path);
+    broadcast_watch!(target);
+    broadcast_defer!(ChangeType::RENAME, path);
+    broadcast_defer!(ChangeType::CHANGE, target);
+    broadcast_defer!(name_of!(symlinkSync), target, path);
     lfs::symlink_sync(target.as_str(), path.as_str())
 }
 
@@ -168,7 +184,9 @@ pub unsafe fn openSync(
     } else {
         None
     };
-    broadcast!(name_of!(openSync), path, flags, mode);
+    let pathClone = path.clone();
+    broadcast_watch!(pathClone);
+    broadcast_defer!(name_of!(openSync), path, flags, mode);
     if let Some(fd) = lfs::open_sync(path.as_str(), flags.as_ref().map(|s| s.as_str()), mode) {
         return Ok(fd);
     } else {
@@ -182,7 +200,7 @@ pub unsafe fn openSync(
 
 #[wasm_bindgen]
 pub unsafe fn opendirSync(path: String) -> Result<usize, JsValue> {
-    broadcast!(name_of!(opendirSync), path);
+    broadcast_defer!(name_of!(opendirSync), path);
     openSync(path, None, None)
 }
 
@@ -192,13 +210,13 @@ pub unsafe fn openfileSync(
     flags: Option<String>,
     mode: Option<UnionStringNumber>,
 ) -> Result<usize, JsValue> {
-    broadcast!(name_of!(openfileSync), path);
+    broadcast_defer!(name_of!(openfileSync), path);
     openSync(path, flags, mode)
 }
 
 #[wasm_bindgen]
 pub unsafe fn closeSync(fd: usize) -> Result<(), JsValue> {
-    broadcast!(name_of!(closeSync), fd);
+    broadcast_defer!(name_of!(closeSync), fd);
     if lfs::close_sync(fd).is_some() {
         Ok(())
     } else {
@@ -211,7 +229,7 @@ pub unsafe fn closeSync(fd: usize) -> Result<(), JsValue> {
 
 #[wasm_bindgen]
 pub unsafe fn lseekSync(fd: usize, offset: i32, whence: i32) -> i32 {
-    broadcast!(name_of!(lseekSync), fd, offset, whence);
+    broadcast_defer!(name_of!(lseekSync), fd, offset, whence);
     lfs::lseek_sync(fd, offset, whence).unwrap_or(-1)
 }
 
@@ -223,7 +241,7 @@ pub unsafe fn readSync(
     length: Option<usize>,
     position: Option<i32>,
 ) -> usize {
-    broadcast!(name_of!(readSync), fd, offset, length, position);
+    broadcast_defer!(name_of!(readSync), fd, offset, length, position);
     lfs::read_sync(fd, buffer, offset, length, position).unwrap_or(0)
 }
 
@@ -235,14 +253,15 @@ pub unsafe fn writeSync(
     length: Option<usize>,
     position: Option<i32>,
 ) -> usize {
-    broadcast!(name_of!(writeSync), fd, offset, length, position);
-    broadcast!(ChangeType::CHANGE, path_from_fd(fd));
+    broadcast_watch!(path_from_fd(fd));
+    broadcast_defer!(name_of!(writeSync), fd, offset, length, position);
+    broadcast_defer!(ChangeType::CHANGE, path_from_fd(fd));
     lfs::write_sync(fd, buffer, offset, length, position).unwrap_or(0)
 }
 
 #[wasm_bindgen]
 pub unsafe fn fstatSync(fd: usize) -> NodeStats {
-    broadcast!(name_of!(fstatSync), fd);
+    broadcast_defer!(name_of!(fstatSync), fd);
     let stat = lfs::fstat(fd).unwrap();
     NodeStats {
         dev: stat.dev,
@@ -269,48 +288,55 @@ pub unsafe fn fchmodSync(fd: usize, mode: UnionStringNumber) {
     } else {
         mode.as_f64().unwrap() as i32
     };
-    broadcast!(name_of!(fchmodSync), fd, mode);
-    broadcast!(ChangeType::CHANGE, path_from_fd(fd));
+    broadcast_watch!(path_from_fd(fd));
+    broadcast_defer!(name_of!(fchmodSync), fd, mode);
+    broadcast_defer!(ChangeType::CHANGE, path_from_fd(fd));
     lfs::fchmod(fd, mode).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn fchownSync(fd: usize, uid: usize, gid: usize) {
-    broadcast!(name_of!(fchownSync), fd, uid, gid);
-    broadcast!(ChangeType::CHANGE, path_from_fd(fd));
+    broadcast_watch!(path_from_fd(fd));
+    broadcast_defer!(name_of!(fchownSync), fd, uid, gid);
+    broadcast_defer!(ChangeType::CHANGE, path_from_fd(fd));
     lfs::fchown(fd, uid as i32, gid as i32).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn ftruncateSync(fd: usize, len: Option<usize>) {
     let len = len.unwrap_or(0);
-    broadcast!(name_of!(ftruncateSync), fd, len);
-    broadcast!(ChangeType::CHANGE, path_from_fd(fd));
+    broadcast_watch!(path_from_fd(fd));
+    broadcast_defer!(name_of!(ftruncateSync), fd, len);
+    broadcast_defer!(ChangeType::CHANGE, path_from_fd(fd));
     lfs::ftruncate(fd, len).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn futimesSync(fd: usize, atime: f64, mtime: f64) {
-    broadcast!(name_of!(futimesSync), fd, atime, mtime);
-    broadcast!(ChangeType::CHANGE, path_from_fd(fd));
+    broadcast_watch!(path_from_fd(fd));
+    broadcast_defer!(name_of!(futimesSync), fd, atime, mtime);
+    broadcast_defer!(ChangeType::CHANGE, path_from_fd(fd));
     lfs::futimes(fd, atime, mtime).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn fsyncSync(fd: usize) {
-    broadcast!(name_of!(fsyncSync), fd);
+    broadcast_watch!(path_from_fd(fd));
+    broadcast_defer!(name_of!(fsyncSync), fd);
     lfs::fsync(fd).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn fdatasyncSync(fd: usize) {
-    broadcast!(name_of!(fdatasyncSync), fd);
+    broadcast_watch!(path_from_fd(fd));
+    broadcast_defer!(name_of!(fdatasyncSync), fd);
     lfs::fdatasync(fd).unwrap()
 }
 
 #[wasm_bindgen]
 pub unsafe fn existsSync(path: String) -> bool {
-    broadcast!(name_of!(existsSync), path);
+    broadcast_watch!(path);
+    broadcast_defer!(name_of!(existsSync), path);
     lfs::exists_sync(path.as_str())
 }
 
@@ -359,7 +385,8 @@ impl Dirent {
 
 #[wasm_bindgen]
 pub unsafe fn freaddirSync(fd: usize) -> Option<Dirent> {
-    broadcast!(name_of!(freaddirSync), fd);
+    broadcast_watch!(path_from_fd(fd));
+    broadcast_defer!(name_of!(freaddirSync), fd);
     let ent = lfs::freaddir_sync(fd)?;
     Some(
         (Dirent {
@@ -377,6 +404,8 @@ pub unsafe fn readdirSync(
     path: String,
     options: Option<UnionObjectUndefined>,
 ) -> Result<JsValue, JsValue> {
+    let pathClone = path.clone();
+    broadcast_watch!(pathClone);
     if !existsSync(path.clone()) {
         let err: JsValue = JsError::new("ENOENT: no such file or directory").into();
         Reflect::set(&err, &"path".into(), &path.into()).unwrap();
@@ -398,7 +427,7 @@ pub unsafe fn readdirSync(
         .unwrap_or(false);
     let arr = js_sys::Array::new();
     if with_file_types {
-        broadcast!(name_of!(readdirSync), path, with_file_types);
+        broadcast_defer!(name_of!(readdirSync), path, with_file_types);
         for dirent in lfs::readdir_sync(path.as_str()) {
             arr.push(
                 &(Dirent {
@@ -411,7 +440,7 @@ pub unsafe fn readdirSync(
             );
         }
     } else {
-        broadcast!(name_of!(readdirSync), path);
+        broadcast_defer!(name_of!(readdirSync), path);
         for dirent in lfs::readdir_sync(path.as_str()) {
             arr.push(&dirent.name.into());
         }
@@ -433,19 +462,30 @@ pub unsafe fn mkdirSync(
         .unwrap_or_default()
         .as_f64()
         .unwrap_or(lfs::DEFAULT_PERM_DIR as f64) as i32;
-    broadcast!(name_of!(mkdirSync), path, recursive, mode);
-    broadcast!(ChangeType::CHANGE, path); // recursive?
-    broadcast!(ChangeType::CREATE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(ChangeType::RENAME, path);
+    broadcast_defer!(name_of!(mkdirSync), path, recursive, mode);
+    if recursive {
+        let paths = lfs::path_split(path.as_str());
+        for p in paths {
+            broadcast_watch!(p);
+            broadcast_defer!(ChangeType::CHANGE, p);
+            broadcast_defer!(ChangeType::RENAME, p);
+        }
+    }
     lfs::mkdir_sync(path.as_str(), recursive, mode)
 }
 
 #[wasm_bindgen]
 pub unsafe fn mkdtempSync(prefix: String) -> String {
     let ret = lfs::mkdtemp_sync(prefix.as_str());
+    let retClone = ret.clone();
     // note: this is the only function that broadcasts the result
-    broadcast!(name_of!(mkdtempSync), prefix, ret);
-    broadcast!(ChangeType::CHANGE, ret);
-    broadcast!(ChangeType::CREATE, ret);
+    broadcast_watch!(retClone);
+    broadcast_defer!(ChangeType::CHANGE, ret);
+    broadcast_defer!(ChangeType::RENAME, ret);
+    broadcast_defer!(name_of!(mkdtempSync), prefix, ret);
     ret
 }
 
@@ -470,8 +510,9 @@ pub unsafe fn writeFileSync(
         .as_string()
         .unwrap_or("w".to_string())
         .to_lowercase();
-    broadcast!(name_of!(writeFileSync), path);
-    broadcast!(ChangeType::CHANGE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(name_of!(writeFileSync), path);
     if encoding != "utf8" && encoding != "utf-8" && encoding != "buffer" {
         return Err(JsError::new("unsupported encoding"));
     }
@@ -514,7 +555,9 @@ pub unsafe fn readFileSync(
         Reflect::set(&err, &"syscall".into(), &"read".into()).unwrap();
         return Err(err);
     }
-    broadcast!(name_of!(readFileSync), path);
+    let pathClone = path.clone();
+    broadcast_watch!(pathClone);
+    broadcast_defer!(name_of!(readFileSync), path);
     let data = lfs::read_file_sync(path.as_str()).unwrap();
     let out = match encoding.as_str() {
         "utf8" | "utf-8" => {
@@ -551,8 +594,9 @@ pub unsafe fn appendFileSync(
         .as_string()
         .unwrap_or("a".to_string())
         .to_lowercase();
-    broadcast!(name_of!(appendFileSync), path);
-    broadcast!(ChangeType::CHANGE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(name_of!(appendFileSync), path);
     if encoding != "utf8" && encoding != "utf-8" && encoding != "buffer" {
         return Err(JsError::new("unsupported encoding"));
     }
@@ -599,7 +643,7 @@ impl StatFs {
 
 #[wasm_bindgen]
 pub unsafe fn statfsSync(path: String, dump: Option<bool>) -> StatFs {
-    broadcast!(name_of!(statfsSync), path, dump);
+    broadcast_defer!(name_of!(statfsSync), path, dump);
     let stat = lfs::statfs_sync(path.as_str(), dump);
     StatFs {
         bsize: stat.bsize,
@@ -620,49 +664,55 @@ pub unsafe fn chmodSync(path: String, mode: UnionStringNumber) {
     } else {
         mode.as_f64().unwrap() as i32
     };
-    broadcast!(name_of!(chmodSync), path, mode);
-    broadcast!(ChangeType::CHANGE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(name_of!(chmodSync), path, mode);
     lfs::chmod_sync(path.as_str(), mode).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn chownSync(path: String, uid: usize, gid: usize) {
-    broadcast!(name_of!(chownSync), path, uid, gid);
-    broadcast!(ChangeType::CHANGE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(name_of!(chownSync), path, uid, gid);
     lfs::chown_sync(path.as_str(), uid as i32, gid as i32).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn truncateSync(path: String, len: Option<usize>) {
     let len = len.unwrap_or(0);
-    broadcast!(name_of!(truncateSync), path, len);
-    broadcast!(ChangeType::CHANGE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(name_of!(truncateSync), path, len);
     lfs::truncate_sync(path.as_str(), len).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn utimesSync(path: String, atime: f64, mtime: f64) {
-    broadcast!(name_of!(utimesSync), path, atime, mtime);
-    broadcast!(ChangeType::CHANGE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(name_of!(utimesSync), path, atime, mtime);
     lfs::utimes_sync(path.as_str(), atime, mtime).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn unlinkSync(path: String) -> Result<JsValue, JsValue> {
-    broadcast!(name_of!(unlinkSync), path);
-    broadcast!(ChangeType::CHANGE, path);
-    broadcast!(ChangeType::DELETE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(ChangeType::RENAME, path);
+    broadcast_defer!(name_of!(unlinkSync), path);
     lfs::unlink_sync(path.as_str(), Some(true))
 }
 
 #[wasm_bindgen]
 pub unsafe fn renameSync(old_path: String, new_path: String) {
-    broadcast!(name_of!(renameSync), old_path, new_path);
-    broadcast!(ChangeType::RENAME, old_path, new_path);
-    broadcast!(ChangeType::CHANGE, old_path);
-    broadcast!(ChangeType::DELETE, old_path);
-    broadcast!(ChangeType::CHANGE, new_path);
-    broadcast!(ChangeType::CREATE, new_path);
+    broadcast_watch!(old_path);
+    broadcast_watch!(new_path);
+    broadcast_defer!(ChangeType::CHANGE, old_path);
+    broadcast_defer!(ChangeType::RENAME, old_path);
+    broadcast_defer!(ChangeType::CHANGE, new_path);
+    broadcast_defer!(ChangeType::RENAME, new_path);
+    broadcast_defer!(name_of!(renameSync), old_path, new_path);
     lfs::rename_sync(old_path.as_str(), new_path.as_str()).unwrap();
 }
 
@@ -679,17 +729,20 @@ pub unsafe fn copyFileSync(
         .as_f64()
         .unwrap_or(0.0) as i32;
     let excl = mode | COPYFILE_EXCL != 0;
-    broadcast!(name_of!(copyFileSync), src, dest);
-    broadcast!(ChangeType::CHANGE, dest);
-    broadcast!(ChangeType::CREATE, dest);
+    broadcast_watch!(src);
+    broadcast_watch!(dest);
+    broadcast_defer!(ChangeType::CHANGE, dest);
+    broadcast_defer!(ChangeType::RENAME, dest);
+    broadcast_defer!(name_of!(copyFileSync), src, dest);
     lfs::copy_file_sync(src.as_str(), dest.as_str(), excl)
 }
 
 #[wasm_bindgen]
 pub unsafe fn rmdirSync(path: String) {
-    broadcast!(name_of!(rmdirSync), path);
-    broadcast!(ChangeType::CHANGE, path); // recursive?
-    broadcast!(ChangeType::DELETE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(ChangeType::RENAME, path);
+    broadcast_defer!(name_of!(rmdirSync), path);
     lfs::rmdir_sync(path.as_str(), Some(false)).unwrap();
 }
 
@@ -704,27 +757,37 @@ pub unsafe fn rmSync(path: String, options: Option<UnionObjectUndefined>) {
         .unwrap_or(JsValue::UNDEFINED)
         .as_bool()
         .unwrap_or(false);
-    broadcast!(name_of!(rmSync), path, recursive, force);
-    broadcast!(ChangeType::CHANGE, path); // recursive?
-    broadcast!(ChangeType::DELETE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(ChangeType::RENAME, path);
+    broadcast_defer!(name_of!(rmSync), path, recursive, force);
+    if recursive {
+        let paths = lfs::path_split(path.as_str());
+        for p in paths {
+            broadcast_watch!(p);
+            broadcast_defer!(ChangeType::CHANGE, p);
+            broadcast_defer!(ChangeType::RENAME, p);
+        }
+    }
     lfs::rm_sync(path.as_str(), recursive, force).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn accessSync(path: String, mode: Option<i32>) -> Result<JsValue, JsValue> {
-    broadcast!(name_of!(accessSync), path, mode);
+    // broadcast_watch!(path); // deadlocks?
+    broadcast_defer!(name_of!(accessSync), path, mode);
     lfs::access_sync(path.as_str(), mode)
 }
 
 #[wasm_bindgen]
 pub unsafe fn realpathSync(path: String) -> String {
-    broadcast!(name_of!(realpathSync), path);
+    broadcast_defer!(name_of!(realpathSync), path);
     lfs::realpath_sync(path.as_str(), None)
 }
 
 #[wasm_bindgen]
 pub unsafe fn readlinkSync(path: String) -> Result<JsValue, JsValue> {
-    broadcast!(name_of!(readlinkSync), path);
+    broadcast_defer!(name_of!(readlinkSync), path);
     lfs::readlink_sync(path.as_str())
 }
 
@@ -734,7 +797,7 @@ pub unsafe fn statSync(
     options: Option<UnionObjectUndefined>,
 ) -> Result<JsValue, JsValue> {
     let options = options.unwrap_or(UnionObjectUndefined::from(JsValue::undefined()));
-    broadcast!(name_of!(statSync), path);
+    broadcast_defer!(name_of!(statSync), path);
     let throw_if_no_entry = Reflect::get(&options, &"throwIfNoEntry".into())
         .unwrap_or(JsValue::UNDEFINED)
         .as_bool()
@@ -778,22 +841,25 @@ pub unsafe fn lchmodSync(path: String, mode: UnionStringNumber) {
     } else {
         mode.as_f64().unwrap() as i32
     };
-    broadcast!(name_of!(lchmodSync), path, mode);
-    broadcast!(ChangeType::CHANGE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(name_of!(lchmodSync), path, mode);
     lfs::lchmod_sync(path.as_str(), mode).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn lchownSync(path: String, uid: usize, gid: usize) {
-    broadcast!(name_of!(lchownSync), path, uid, gid);
-    broadcast!(ChangeType::CHANGE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(name_of!(lchownSync), path, uid, gid);
     lfs::lchown_sync(path.as_str(), uid as i32, gid as i32).unwrap();
 }
 
 #[wasm_bindgen]
 pub unsafe fn lutimesSync(path: String, atime: f64, mtime: f64) {
-    broadcast!(name_of!(lutimesSync), path, atime, mtime);
-    broadcast!(ChangeType::CHANGE, path);
+    broadcast_watch!(path);
+    broadcast_defer!(ChangeType::CHANGE, path);
+    broadcast_defer!(name_of!(lutimesSync), path, atime, mtime);
     lfs::lutimes_sync(path.as_str(), atime, mtime).unwrap();
 }
 
@@ -803,7 +869,7 @@ pub unsafe fn lstatSync(
     options: Option<UnionObjectUndefined>,
 ) -> Result<JsValue, JsValue> {
     let options = options.unwrap_or(UnionObjectUndefined::from(JsValue::undefined()));
-    broadcast!(name_of!(lstatSync), path);
+    broadcast_defer!(name_of!(lstatSync), path);
     let throw_if_no_entry = Reflect::get(&options, &"throwIfNoEntry".into())
         .unwrap_or(JsValue::UNDEFINED)
         .as_bool()

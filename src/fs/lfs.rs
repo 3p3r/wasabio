@@ -234,7 +234,7 @@ impl Drop for InfoHandle {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NodeStats {
     pub dev: f64,
     pub ino: f64,
@@ -1623,7 +1623,7 @@ fn path_normalize(path: &str) -> String {
     normalized_path
 }
 
-fn path_split(path: &str) -> Vec<String> {
+pub fn path_split(path: &str) -> Vec<String> {
     let mut paths = Vec::new();
     let components: Vec<&str> = path.split('/').collect();
     let mut current_path = String::new();

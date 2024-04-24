@@ -867,3 +867,138 @@ export function createWriteStream(path: fs.PathLike, options?: string | object):
 	const _opts = typeof options === "string" ? { encoding: options } : options || {};
 	return new emptyVolume.WriteStream.prototype.__proto__.constructor({ open, write, close }, path, _opts) as Writable;
 }
+
+class Singleton<T> {
+	private _instance: T | undefined;
+	constructor(private readonly _factory: () => T) {}
+	get(): T {
+		if (!this._instance) {
+			this._instance = this._factory();
+		}
+		return this._instance;
+	}
+}
+
+const fileSystemSharedEmitter = new Singleton(() => new EventEmitter("fs"));
+const exposedSurfacedEmitters = new Set<Watcher>();
+
+class Watcher extends EventEmitter implements fs.FSWatcher, fs.StatWatcher {
+	private _refs = 0;
+	constructor(
+		readonly path: string,
+		readonly watcher: Function,
+		private readonly cleanup?: Function,
+	) {
+		super();
+		exposedSurfacedEmitters.add(this);
+		this.on("change", () => {
+			if (!exposedSurfacedEmitters.has(this)) {
+				this.close();
+			}
+		});
+	}
+	ref() {
+		this._refs++;
+		return this;
+	}
+	unref() {
+		this._refs--;
+		if (this._refs <= 0) this.close();
+		return this;
+	}
+	close(): void {
+		exposedSurfacedEmitters.delete(this);
+		this._refs = 0;
+		this.cleanup?.();
+		this.emit("close");
+		this.removeAllListeners();
+	}
+}
+
+// @ts-ignore
+export const watch: typeof fs.watch = (filename, ...args): Watcher => {
+	const opts = (args.find((arg) => typeof arg === "object") || {}) as fs.WatchOptions;
+	const listener = (args.find((arg) => typeof arg === "function") || (() => {})) as Function;
+	const _filename = normalizePathLikeToString(filename);
+	const watcher = new Watcher(_filename, listener);
+	watcher.on("change", listener as any);
+	const _listener = (event: string, file: string) => {
+		if (opts.recursive) {
+			if (file.startsWith(_filename)) {
+				watcher.emit("change", event, file);
+			}
+		} else {
+			if (file === _filename) {
+				watcher.emit("change", event, file);
+			}
+		}
+	};
+	const _c = _listener.bind(null, "change");
+	const _r = _listener.bind(null, "rename");
+	fileSystemSharedEmitter.get().on("change", _c);
+	fileSystemSharedEmitter.get().on("rename", _r);
+	return watcher.once("close", () => {
+		fileSystemSharedEmitter.get().off("change", _c);
+		fileSystemSharedEmitter.get().off("rename", _r);
+	});
+};
+
+// @ts-ignore
+export const watchFile: typeof fs.watchFile = (filename, ...args): Watcher => {
+	// const opts = (args.find((arg) => typeof arg === "object") || {}) as fs.WatchFileOptions;
+	const listener = (args.find((arg) => typeof arg === "function") || (() => {})) as Function;
+	const watcher = new Watcher(normalizePathLikeToString(filename), listener);
+	watcher.on("change", listener as any);
+	const _listener = (curr?: Partial<fs.Stats>, prev?: Partial<fs.Stats>) => {
+		const now = new Date();
+		const nowStat = {
+			atime: now,
+			mtime: now,
+			ctime: now,
+			birthtime: now,
+			atimeMs: now.getTime(),
+			mtimeMs: now.getTime(),
+			ctimeMs: now.getTime(),
+			birthtimeMs: now.getTime(),
+			blksize: 0,
+			blocks: 0,
+			dev: 0,
+			gid: 0,
+			ino: 0,
+			mode: 0,
+			nlink: 0,
+			rdev: 0,
+			size: 0,
+			uid: 0,
+			isBlockDevice: () => false,
+			isCharacterDevice: () => false,
+			isDirectory: () => false,
+			isFIFO: () => false,
+			isFile: () => false,
+			isSocket: () => false,
+			isSymbolicLink: () => false,
+		};
+		const _curr = { ...nowStat, ...curr };
+		const _prev = { ...nowStat, ...prev };
+		watcher.emit("change", _curr, _prev);
+	};
+	fileSystemSharedEmitter.get().on("watch_", _listener);
+	return watcher.once("close", () => {
+		fileSystemSharedEmitter.get().off("watch_", _listener);
+	});
+};
+
+// @ts-ignore
+export const unwatchFile: typeof fs.unwatchFile = (filename, ...args): void => {
+	if (filename === "*") {
+		fileSystemSharedEmitter.get().removeAllListeners();
+		return exposedSurfacedEmitters.clear();
+	}
+	const _filename = normalizePathLikeToString(filename);
+	const listener = (args.find((arg) => typeof arg === "function") || (() => {})) as Function;
+	for (const emitter of exposedSurfacedEmitters) {
+		if (listener ? emitter.watcher === listener : emitter.path === _filename) {
+			emitter.close();
+		}
+	}
+};
