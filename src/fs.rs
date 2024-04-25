@@ -698,7 +698,6 @@ pub unsafe fn utimesSync(path: String, atime: f64, mtime: f64) {
 #[wasm_bindgen]
 pub unsafe fn unlinkSync(path: String) -> Result<JsValue, JsValue> {
     broadcast_watch!(path);
-    broadcast_defer!(ChangeType::CHANGE, path);
     broadcast_defer!(ChangeType::RENAME, path);
     broadcast_defer!(name_of!(unlinkSync), path);
     lfs::unlink_sync(path.as_str(), Some(true))
@@ -708,9 +707,7 @@ pub unsafe fn unlinkSync(path: String) -> Result<JsValue, JsValue> {
 pub unsafe fn renameSync(old_path: String, new_path: String) {
     broadcast_watch!(old_path);
     broadcast_watch!(new_path);
-    broadcast_defer!(ChangeType::CHANGE, old_path);
     broadcast_defer!(ChangeType::RENAME, old_path);
-    broadcast_defer!(ChangeType::CHANGE, new_path);
     broadcast_defer!(ChangeType::RENAME, new_path);
     broadcast_defer!(name_of!(renameSync), old_path, new_path);
     lfs::rename_sync(old_path.as_str(), new_path.as_str()).unwrap();
@@ -731,7 +728,7 @@ pub unsafe fn copyFileSync(
     let excl = mode | COPYFILE_EXCL != 0;
     broadcast_watch!(src);
     broadcast_watch!(dest);
-    broadcast_defer!(ChangeType::CHANGE, dest);
+    broadcast_defer!(ChangeType::CHANGE, src);
     broadcast_defer!(ChangeType::RENAME, dest);
     broadcast_defer!(name_of!(copyFileSync), src, dest);
     lfs::copy_file_sync(src.as_str(), dest.as_str(), excl)
@@ -740,7 +737,6 @@ pub unsafe fn copyFileSync(
 #[wasm_bindgen]
 pub unsafe fn rmdirSync(path: String) {
     broadcast_watch!(path);
-    broadcast_defer!(ChangeType::CHANGE, path);
     broadcast_defer!(ChangeType::RENAME, path);
     broadcast_defer!(name_of!(rmdirSync), path);
     lfs::rmdir_sync(path.as_str(), Some(false)).unwrap();
@@ -758,14 +754,12 @@ pub unsafe fn rmSync(path: String, options: Option<UnionObjectUndefined>) {
         .as_bool()
         .unwrap_or(false);
     broadcast_watch!(path);
-    broadcast_defer!(ChangeType::CHANGE, path);
     broadcast_defer!(ChangeType::RENAME, path);
     broadcast_defer!(name_of!(rmSync), path, recursive, force);
     if recursive {
         let paths = lfs::path_split(path.as_str());
         for p in paths {
             broadcast_watch!(p);
-            broadcast_defer!(ChangeType::CHANGE, p);
             broadcast_defer!(ChangeType::RENAME, p);
         }
     }

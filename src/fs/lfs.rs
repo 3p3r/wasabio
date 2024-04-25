@@ -1104,7 +1104,11 @@ pub fn mkdtemp_sync(prefix: &str) -> String {
 
 pub fn readdir_sync(path: &str) -> Vec<Dirent> {
     let mut res = vec![];
-    let mut handle = DirHandle::open(path).unwrap();
+    let handle = DirHandle::open(path);
+    if handle.is_none() {
+        return res;
+    }
+    let mut handle = handle.unwrap();
     while let Some(dirent) = handle.read() {
         res.push(dirent);
     }

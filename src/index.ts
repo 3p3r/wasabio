@@ -29,6 +29,7 @@ import { ok } from "assert";
 import { Volume } from "memfs/lib/volume";
 import { backOff } from "exponential-backoff";
 import { callbackify } from "util";
+// @ts-ignore - some times "npm run build" wipes @types for this ??
 import { isEqual } from "lodash";
 
 const toUInt8 = (buf: any): Uint8Array =>
@@ -1005,8 +1006,8 @@ export const unwatchFile: typeof fs.unwatchFile = (filename, ...args): void => {
 };
 
 export const join = (path: string, ...paths: string[]) => resolve([path, ...paths].join("/"));
-export const dirname = (path: string) => resolve(path.split("/").slice(0, -1).join("/") || "/");
-export const basename = (path: string) => resolve(path.split("/").pop()) || "";
+export const dirname = (path: string) => resolve(path).split("/").slice(0, -1).join("/") || "/";
+export const basename = (path: string) => resolve(path).split("/").pop() || "";
 export const resolve = (path: string) => path.replace(/\/$/, "").replace(/^/, "/").replace(/\/+/g, "/") || "/";
 
 /**
@@ -1015,20 +1016,19 @@ export const resolve = (path: string) => path.replace(/\/$/, "").replace(/^/, "/
  * @param fileFilter a function that filters files to sync
  * @param externalDir where root directory is located in the external filesystem
  * @param internalDir where root directory is located in the wasabio filesystem
- * @returns two watchers. close them to stop syncing
+ * @returns close function
  */
 export async function mirror(
 	externalFS: typeof fs,
-	fileFilter: (path: string) => boolean = () => true,
 	externalDir: string = "/",
 	internalDir: string = "/",
-) {
-	const { default: debug } = await import("debug");
-	const log = debug("wasabio");
-	log("mirroring %s (external) to %s (internal)", externalDir, internalDir);
+	fileFilter: (path: string) => boolean = () => true,
+	logger: (format: string, ...args: any[]) => void = () => {},
+): Promise<() => void> {
+	logger("mirroring %s (external) with %s (internal)", externalDir, internalDir);
 	await promises.rm(internalDir, { recursive: true, force: true }).catch(() => {});
 	await promises.mkdir(internalDir, { recursive: true });
-	log("cleaned %s (internal)", internalDir);
+	logger("cleaned %s (internal)", internalDir);
 
 	async function listAllFiles(path: string, readdirFn: typeof promises.readdir): Promise<string[]> {
 		const stats = await readdirFn(path, { withFileTypes: true, recursive: true });
@@ -1054,81 +1054,90 @@ export async function mirror(
 		]);
 		if (!isEqual(internalContent, externalContent))
 			return {
-				internalPath,
-				externalPath,
 				internalContent,
 				externalContent,
 			};
 	}
 
 	async function initialize() {
-		log("initializing");
+		logger("initializing");
+		await externalFS.promises.mkdir(externalDir, { recursive: true });
 		const externalFiles = await listAllFiles(externalDir, externalFS.promises.readdir);
-		log("found %d files in %s (external)", externalFiles.length, externalDir);
+		logger("found %d files in %s (external)", externalFiles.length, externalDir);
 		for (const file of externalFiles) {
-			log("copying %s (external) to %s (internal)", externalDir + file, internalDir + file);
+			logger("copying %s (external) to %s (internal)", externalDir + file, internalDir + file);
 			const externalPath = externalDir + file;
 			const internalPath = internalDir + file;
 			const externalContent = await externalFS.promises.readFile(externalPath);
 			await promises.mkdir(dirname(internalPath), { recursive: true });
 			await promises.writeFile(internalPath, externalContent);
-			log("copied %s", basename(internalPath));
+			logger("copied %s", basename(internalPath));
 		}
 	}
 
 	await initialize();
-	log("initialized");
+	logger("initialized");
 
-	return [
-		watch(internalDir, { recursive: true }, async (change, affected) => {
-			log("internal %s %s", change, affected);
-			const rel = affected.replace(internalDir, "");
-			const stat = await promises.stat(affected);
-			if (!fileFilter(rel) || stat.isDirectory()) return;
+	const internalWatcher = watch(internalDir, { recursive: true }, async (change, affected) => {
+		logger("internal event: %s %s", change, affected);
+		const rel = affected.replace(internalDir, "").replace(/^\//, "");
+		const internalPath = join(internalDir, rel);
+		const externalPath = join(externalDir, rel);
 
-			if (change === "change") {
-				const diff = await compareTwoFiles(rel);
-				if (diff) {
-					log("syncing %s to %s", diff.internalPath, diff.externalPath);
-					await externalFS.promises.writeFile(diff.externalPath, diff.internalContent);
-				}
+		if (!fileFilter(rel)) return;
+
+		if (change === "change") {
+			const diff = await compareTwoFiles(rel);
+			if (diff) {
+				logger("syncing %s to %s", internalPath, externalPath);
+				await externalFS.promises.mkdir(dirname(externalPath), { recursive: true });
+				await externalFS.promises.writeFile(externalPath, diff.internalContent);
 			}
+		}
 
-			if (change === "rename") {
-				if (await promises.exists(affected)) {
-					log("writing %s (external)", join(externalDir, rel));
-					const content = await promises.readFile(affected);
-					await externalFS.promises.writeFile(join(externalDir, rel), content);
-				} else {
-					log("deleting %s (external)", join(externalDir, rel));
-					await externalFS.promises.rm(join(externalDir, rel), { recursive: true, force: true });
+		if (change === "rename") {
+			setTimeout(async () => {
+				const existsInInternal = await promises.exists(internalPath);
+				const existsInExternal = externalFS.existsSync(externalPath);
+				if (!existsInInternal && existsInExternal) {
+					logger("deleting %s (external)", externalPath);
+					await externalFS.promises.rm(externalPath).catch(() => {});
 				}
+			}, 100);
+		}
+	});
+
+	const externalWatcher = externalFS.watch(externalDir, { recursive: true }, async (change, affected) => {
+		logger("external event: %s %s", change, affected);
+		const rel = affected.replace(externalDir, "").replace(/^\//, "");
+		const internalPath = join(internalDir, rel);
+		const externalPath = join(externalDir, rel);
+
+		if (!fileFilter(rel)) return;
+
+		if (change === "change") {
+			const diff = await compareTwoFiles(rel);
+			if (diff) {
+				logger("syncing %s to %s", externalPath, internalPath);
+				await promises.mkdir(dirname(internalPath), { recursive: true });
+				await promises.writeFile(internalPath, diff.externalContent);
 			}
-		}),
+		}
 
-		externalFS.watch(externalDir, { recursive: true }, async (change, affected) => {
-			log("external %s %s", change, affected);
-			const rel = affected.replace(externalDir, "");
-			if (!fileFilter(rel)) return;
-
-			if (change === "change") {
-				const diff = await compareTwoFiles(rel);
-				if (diff) {
-					log("syncing %s to %s", diff.externalPath, diff.internalPath);
-					await promises.writeFile(diff.internalPath, diff.externalContent);
+		if (change === "rename") {
+			setTimeout(async () => {
+				const existsInInternal = await promises.exists(internalPath);
+				const existsInExternal = externalFS.existsSync(externalPath);
+				if (!existsInExternal && existsInInternal) {
+					logger("deleting %s (internal)", internalPath);
+					await promises.rm(internalPath, undefined).catch(() => {});
 				}
-			}
+			}, 100);
+		}
+	});
 
-			if (change === "rename") {
-				if (externalFS.existsSync(affected)) {
-					log("writing %s (internal)", join(internalDir, rel));
-					const content = await externalFS.promises.readFile(affected);
-					await promises.writeFile(join(internalDir, rel), content);
-				} else {
-					log("deleting %s (internal)", join(internalDir, rel));
-					await promises.rm(join(internalDir, rel), { recursive: true, force: true });
-				}
-			}
-		}),
-	];
+	return (): void => {
+		internalWatcher.close();
+		externalWatcher.close();
+	};
 }

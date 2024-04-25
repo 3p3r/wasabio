@@ -37,6 +37,7 @@ module.exports = function (config: karma.Config) {
 				timeout: mochaConfig.timeout,
 			},
 		},
+		concurrency: 1,
 		autoWatch: false,
 		singleRun: true,
 		logLevel: config.LOG_WARN,
