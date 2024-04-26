@@ -6,7 +6,6 @@ import childProcess from "child_process";
 import CopyPlugin from "copy-webpack-plugin";
 import TerserPlugin from "terser-webpack-plugin";
 import ShellPlugin from "webpack-shell-plugin-next";
-import NodeExternals from "webpack-node-externals";
 
 const OUT_DIR = path.resolve("dist");
 fs.rmSync(OUT_DIR, { recursive: true, force: true });
@@ -268,35 +267,5 @@ export default [
 		};
 
 		return config;
-	},
-	function wasabioPlugin(_env: unknown, { mode }: { mode: string }) {
-		const isProduction = mode === "production";
-		return {
-			mode: isProduction ? "production" : "development",
-			entry: "./src/plugin.ts",
-			output: {
-				path: OUT_DIR,
-				filename: "plugin.js",
-			},
-			target: "node",
-			devtool: isProduction ? false : "inline-source-map",
-			externalsPresets: { node: true },
-			externals: [NodeExternals(), { "wasabio-external": "commonjs wasabio" }],
-			plugins: [new webpack.NormalModuleReplacementPlugin(/src\/index\.ts$/, "redirect.ts")],
-			module: {
-				rules: [
-					{
-						test: /\.[jt]sx?$/,
-						loader: "ts-loader",
-						options: {
-							transpileOnly: false,
-						},
-					},
-				],
-			},
-			resolve: {
-				extensions: [".tsx", ".ts", ".jsx", ".js", ".json"],
-			},
-		} as webpack.Configuration;
 	},
 ];
