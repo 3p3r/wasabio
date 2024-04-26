@@ -873,6 +873,9 @@ export function createWriteStream(path: fs.PathLike, options?: string | object):
 class Singleton<T> {
 	private _instance: T | undefined;
 	constructor(private readonly _factory: () => T) {}
+	release() {
+		this._instance = undefined;
+	}
 	get(): T {
 		if (!this._instance) {
 			this._instance = this._factory();
@@ -994,6 +997,8 @@ export const watchFile: typeof fs.watchFile = (filename, ...args): Watcher => {
 export const unwatchFile: typeof fs.unwatchFile = (filename, ...args): void => {
 	if (filename === "*") {
 		fileSystemSharedEmitter.get().removeAllListeners();
+		fileSystemSharedEmitter.get().dispose();
+		fileSystemSharedEmitter.release();
 		return exposedSurfacedEmitters.clear();
 	}
 	const _filename = normalizePathLikeToString(filename);
@@ -1010,21 +1015,22 @@ export const dirname = (path: string) => resolve(path).split("/").slice(0, -1).j
 export const basename = (path: string) => resolve(path).split("/").pop() || "";
 export const resolve = (path: string) => path.replace(/\/$/, "").replace(/^/, "/").replace(/\/+/g, "/") || "/";
 
-/**
- * watches and mirrors a directory with an external filesystem
- * @param externalFS the external filesystem to sync wasm memory with
- * @param fileFilter a function that filters files to sync
- * @param externalDir where root directory is located in the external filesystem
- * @param internalDir where root directory is located in the wasabio filesystem
- * @returns close function
- */
-export async function mirror(
-	externalFS: typeof fs,
-	externalDir: string = "/",
-	internalDir: string = "/",
-	fileFilter: (path: string) => boolean = () => true,
-	logger: (format: string, ...args: any[]) => void = () => {},
-): Promise<() => void> {
+export interface MirrorOptions {
+	readonly externalFS: typeof fs;
+	readonly externalDir: string;
+	readonly internalDir?: string;
+	readonly fileFilter?: (path: string) => boolean;
+	readonly logger?: (format: string, ...args: any[]) => void;
+}
+
+export interface MirrorOutput {
+	readonly internalWatcher: fs.FSWatcher;
+	readonly externalWatcher: fs.FSWatcher;
+	readonly close: () => void;
+}
+
+export async function mirror(opts: MirrorOptions): Promise<MirrorOutput> {
+	const { externalFS, externalDir, internalDir = externalDir, fileFilter = () => true, logger = console.log } = opts;
 	logger("mirroring %s (external) with %s (internal)", externalDir, internalDir);
 	await promises.rm(internalDir, { recursive: true, force: true }).catch(() => {});
 	await promises.mkdir(internalDir, { recursive: true });
@@ -1078,8 +1084,11 @@ export async function mirror(
 	await initialize();
 	logger("initialized");
 
+	const internalCooldown: string[] = [];
+	const externalCooldown: string[] = [];
+
 	const internalWatcher = watch(internalDir, { recursive: true }, async (change, affected) => {
-		logger("internal event: %s %s", change, affected);
+		logger(">> internal event: %s %s", change, affected);
 		const rel = affected.replace(internalDir, "").replace(/^\//, "");
 		const internalPath = join(internalDir, rel);
 		const externalPath = join(externalDir, rel);
@@ -1087,12 +1096,19 @@ export async function mirror(
 		if (!fileFilter(rel)) return;
 
 		if (change === "change") {
-			const diff = await compareTwoFiles(rel);
-			if (diff) {
-				logger("syncing %s to %s", internalPath, externalPath);
-				await externalFS.promises.mkdir(dirname(externalPath), { recursive: true });
-				await externalFS.promises.writeFile(externalPath, diff.internalContent);
-			}
+			setTimeout(async () => {
+				if (externalCooldown.includes(rel)) {
+					externalCooldown.splice(externalCooldown.indexOf(rel), 1);
+					return;
+				}
+				const diff = await compareTwoFiles(rel);
+				if (diff) {
+					internalCooldown.push(rel);
+					logger("syncing %s to %s", internalPath, externalPath);
+					await externalFS.promises.mkdir(dirname(externalPath), { recursive: true });
+					await externalFS.promises.writeFile(externalPath, diff.internalContent);
+				}
+			});
 		}
 
 		if (change === "rename") {
@@ -1108,7 +1124,7 @@ export async function mirror(
 	});
 
 	const externalWatcher = externalFS.watch(externalDir, { recursive: true }, async (change, affected) => {
-		logger("external event: %s %s", change, affected);
+		logger(">> external event: %s %s", change, affected);
 		const rel = affected.replace(externalDir, "").replace(/^\//, "");
 		const internalPath = join(internalDir, rel);
 		const externalPath = join(externalDir, rel);
@@ -1116,12 +1132,20 @@ export async function mirror(
 		if (!fileFilter(rel)) return;
 
 		if (change === "change") {
-			const diff = await compareTwoFiles(rel);
-			if (diff) {
-				logger("syncing %s to %s", externalPath, internalPath);
-				await promises.mkdir(dirname(internalPath), { recursive: true });
-				await promises.writeFile(internalPath, diff.externalContent);
-			}
+			setTimeout(async () => {
+				if (internalCooldown.includes(rel)) {
+					internalCooldown.splice(internalCooldown.indexOf(rel), 1);
+					return;
+				}
+				const diff = await compareTwoFiles(rel);
+				console.log(diff);
+				if (diff) {
+					externalCooldown.push(rel);
+					logger("syncing %s to %s", externalPath, internalPath);
+					await promises.mkdir(dirname(internalPath), { recursive: true });
+					await promises.writeFile(internalPath, diff.externalContent);
+				}
+			});
 		}
 
 		if (change === "rename") {
@@ -1136,8 +1160,12 @@ export async function mirror(
 		}
 	});
 
-	return (): void => {
-		internalWatcher.close();
-		externalWatcher.close();
+	return {
+		internalWatcher,
+		externalWatcher,
+		close: () => {
+			internalWatcher.close();
+			externalWatcher.close();
+		},
 	};
 }

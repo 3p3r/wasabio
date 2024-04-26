@@ -463,17 +463,8 @@ pub unsafe fn mkdirSync(
         .as_f64()
         .unwrap_or(lfs::DEFAULT_PERM_DIR as f64) as i32;
     broadcast_watch!(path);
-    broadcast_defer!(ChangeType::CHANGE, path);
     broadcast_defer!(ChangeType::RENAME, path);
     broadcast_defer!(name_of!(mkdirSync), path, recursive, mode);
-    if recursive {
-        let paths = lfs::path_split(path.as_str());
-        for p in paths {
-            broadcast_watch!(p);
-            broadcast_defer!(ChangeType::CHANGE, p);
-            broadcast_defer!(ChangeType::RENAME, p);
-        }
-    }
     lfs::mkdir_sync(path.as_str(), recursive, mode)
 }
 
@@ -483,7 +474,6 @@ pub unsafe fn mkdtempSync(prefix: String) -> String {
     let retClone = ret.clone();
     // note: this is the only function that broadcasts the result
     broadcast_watch!(retClone);
-    broadcast_defer!(ChangeType::CHANGE, ret);
     broadcast_defer!(ChangeType::RENAME, ret);
     broadcast_defer!(name_of!(mkdtempSync), prefix, ret);
     ret
@@ -756,13 +746,6 @@ pub unsafe fn rmSync(path: String, options: Option<UnionObjectUndefined>) {
     broadcast_watch!(path);
     broadcast_defer!(ChangeType::RENAME, path);
     broadcast_defer!(name_of!(rmSync), path, recursive, force);
-    if recursive {
-        let paths = lfs::path_split(path.as_str());
-        for p in paths {
-            broadcast_watch!(p);
-            broadcast_defer!(ChangeType::RENAME, p);
-        }
-    }
     lfs::rm_sync(path.as_str(), recursive, force).unwrap();
 }
 
