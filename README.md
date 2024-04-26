@@ -4,10 +4,10 @@ WebAssembly and SharedArrayBuffer IO. Pronounced "wassabee-yo".
 
 - [Purpose](#purpose)
 - [Usage](#usage)
-	- [API](#api)
-	- [Initialization](#initialization)
-		- [From New Memory](#from-new-memory)
-		- [From Existing Memory](#from-existing-memory)
+  - [API](#api)
+  - [Initialization](#initialization)
+    - [From New Memory](#from-new-memory)
+    - [From Existing Memory](#from-existing-memory)
 
 ## Purpose
 

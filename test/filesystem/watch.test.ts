@@ -40,7 +40,7 @@ describe("fs.watch tests", () => {
 	});
 
 	after(() => {
-    fs.unwatchFile('*');
+		fs.unwatchFile("*");
 		fs.rmSync(testDir, { recursive: true, force: true });
 	});
 });
