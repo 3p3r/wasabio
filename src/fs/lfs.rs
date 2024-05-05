@@ -234,7 +234,7 @@ impl Drop for InfoHandle {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NodeStats {
     pub dev: f64,
     pub ino: f64,
@@ -1104,7 +1104,11 @@ pub fn mkdtemp_sync(prefix: &str) -> String {
 
 pub fn readdir_sync(path: &str) -> Vec<Dirent> {
     let mut res = vec![];
-    let mut handle = DirHandle::open(path).unwrap();
+    let handle = DirHandle::open(path);
+    if handle.is_none() {
+        return res;
+    }
+    let mut handle = handle.unwrap();
     while let Some(dirent) = handle.read() {
         res.push(dirent);
     }
@@ -1623,7 +1627,7 @@ fn path_normalize(path: &str) -> String {
     normalized_path
 }
 
-fn path_split(path: &str) -> Vec<String> {
+pub fn path_split(path: &str) -> Vec<String> {
     let mut paths = Vec::new();
     let components: Vec<&str> = path.split('/').collect();
     let mut current_path = String::new();

@@ -1,0 +1,14 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "tests",
+			"request": "launch",
+			"runtimeArgs": ["run-script", "test"],
+			"runtimeExecutable": "npm",
+			"skipFiles": ["<node_internals>/**"],
+			"outFiles": ["${workspaceFolder}/dist/*.(m|c|)js", "!**/node_modules/**"],
+			"type": "node"
+		}
+	]
+}

@@ -29,6 +29,8 @@ import { ok } from "assert";
 import { Volume } from "memfs/lib/volume";
 import { backOff } from "exponential-backoff";
 import { callbackify } from "util";
+// @ts-ignore - some times "npm run build" wipes @types for this ??
+import { isEqual } from "lodash";
 
 const toUInt8 = (buf: any): Uint8Array =>
 	buf instanceof ArrayBuffer
@@ -866,4 +868,304 @@ export function createReadStream(path: fs.PathLike, options?: string | object): 
 export function createWriteStream(path: fs.PathLike, options?: string | object): Writable {
 	const _opts = typeof options === "string" ? { encoding: options } : options || {};
 	return new emptyVolume.WriteStream.prototype.__proto__.constructor({ open, write, close }, path, _opts) as Writable;
+}
+
+class Singleton<T> {
+	private _instance: T | undefined;
+	constructor(private readonly _factory: () => T) {}
+	release() {
+		this._instance = undefined;
+	}
+	get(): T {
+		if (!this._instance) {
+			this._instance = this._factory();
+		}
+		return this._instance;
+	}
+}
+
+const fileSystemSharedEmitter = new Singleton(() => new EventEmitter("fs"));
+const exposedSurfacedEmitters = new Set<Watcher>();
+
+class Watcher extends EventEmitter implements fs.FSWatcher, fs.StatWatcher {
+	private _refs = 0;
+	constructor(
+		readonly path: string,
+		readonly watcher: Function,
+		private readonly cleanup?: Function,
+	) {
+		super();
+		exposedSurfacedEmitters.add(this);
+		this.on("change", () => {
+			if (!exposedSurfacedEmitters.has(this)) {
+				this.close();
+			}
+		});
+	}
+	ref() {
+		this._refs++;
+		return this;
+	}
+	unref() {
+		this._refs--;
+		if (this._refs <= 0) this.close();
+		return this;
+	}
+	close(): void {
+		exposedSurfacedEmitters.delete(this);
+		this._refs = 0;
+		this.cleanup?.();
+		this.emit("close");
+		this.removeAllListeners();
+	}
+}
+
+// @ts-ignore
+export const watch: typeof fs.watch = (filename, ...args): Watcher => {
+	const opts = (args.find((arg) => typeof arg === "object") || {}) as fs.WatchOptions;
+	const listener = (args.find((arg) => typeof arg === "function") || (() => {})) as Function;
+	const _filename = normalizePathLikeToString(filename);
+	const watcher = new Watcher(_filename, listener);
+	watcher.on("change", listener as any);
+	const _listener = (event: string, file: string) => {
+		if (opts.recursive) {
+			if (file.startsWith(_filename)) {
+				watcher.emit("change", event, file);
+			}
+		} else {
+			if (file === _filename) {
+				watcher.emit("change", event, file);
+			}
+		}
+	};
+	const _c = _listener.bind(null, "change");
+	const _r = _listener.bind(null, "rename");
+	fileSystemSharedEmitter.get().on("change", _c);
+	fileSystemSharedEmitter.get().on("rename", _r);
+	return watcher.once("close", () => {
+		fileSystemSharedEmitter.get().off("change", _c);
+		fileSystemSharedEmitter.get().off("rename", _r);
+	});
+};
+
+// @ts-ignore
+export const watchFile: typeof fs.watchFile = (filename, ...args): Watcher => {
+	// const opts = (args.find((arg) => typeof arg === "object") || {}) as fs.WatchFileOptions;
+	const listener = (args.find((arg) => typeof arg === "function") || (() => {})) as Function;
+	const watcher = new Watcher(normalizePathLikeToString(filename), listener);
+	watcher.on("change", listener as any);
+	const _listener = (curr?: Partial<fs.Stats>, prev?: Partial<fs.Stats>) => {
+		const now = new Date();
+		const nowStat = {
+			atime: now,
+			mtime: now,
+			ctime: now,
+			birthtime: now,
+			atimeMs: now.getTime(),
+			mtimeMs: now.getTime(),
+			ctimeMs: now.getTime(),
+			birthtimeMs: now.getTime(),
+			blksize: 0,
+			blocks: 0,
+			dev: 0,
+			gid: 0,
+			ino: 0,
+			mode: 0,
+			nlink: 0,
+			rdev: 0,
+			size: 0,
+			uid: 0,
+			isBlockDevice: () => false,
+			isCharacterDevice: () => false,
+			isDirectory: () => false,
+			isFIFO: () => false,
+			isFile: () => false,
+			isSocket: () => false,
+			isSymbolicLink: () => false,
+		};
+		const _curr = { ...nowStat, ...curr };
+		const _prev = { ...nowStat, ...prev };
+		watcher.emit("change", _curr, _prev);
+	};
+	fileSystemSharedEmitter.get().on("watch_", _listener);
+	return watcher.once("close", () => {
+		fileSystemSharedEmitter.get().off("watch_", _listener);
+	});
+};
+
+// @ts-ignore
+export const unwatchFile: typeof fs.unwatchFile = (filename, ...args): void => {
+	if (filename === "*") {
+		fileSystemSharedEmitter.get().removeAllListeners();
+		fileSystemSharedEmitter.get().dispose();
+		fileSystemSharedEmitter.release();
+		return exposedSurfacedEmitters.clear();
+	}
+	const _filename = normalizePathLikeToString(filename);
+	const listener = (args.find((arg) => typeof arg === "function") || (() => {})) as Function;
+	for (const emitter of exposedSurfacedEmitters) {
+		if (listener ? emitter.watcher === listener : emitter.path === _filename) {
+			emitter.close();
+		}
+	}
+};
+
+export const join = (path: string, ...paths: string[]) => resolve([path, ...paths].join("/"));
+export const dirname = (path: string) => resolve(path).split("/").slice(0, -1).join("/") || "/";
+export const basename = (path: string) => resolve(path).split("/").pop() || "";
+export const resolve = (path: string) => path.replace(/\/$/, "").replace(/^/, "/").replace(/\/+/g, "/") || "/";
+
+export interface MirrorOptions {
+	readonly externalFS: typeof fs;
+	readonly externalDir: string;
+	readonly internalDir?: string;
+	readonly fileFilter?: (path: string) => boolean;
+	readonly logger?: (format: string, ...args: any[]) => void;
+}
+
+export interface MirrorOutput {
+	readonly internalWatcher: fs.FSWatcher;
+	readonly externalWatcher: fs.FSWatcher;
+	readonly close: () => void;
+}
+
+export async function mirror(opts: MirrorOptions): Promise<MirrorOutput> {
+	const { externalFS, externalDir, internalDir = externalDir, fileFilter = () => true, logger = console.log } = opts;
+	logger("mirroring %s (external) with %s (internal)", externalDir, internalDir);
+	await promises.rm(internalDir, { recursive: true, force: true }).catch(() => {});
+	await promises.mkdir(internalDir, { recursive: true });
+	logger("cleaned %s (internal)", internalDir);
+
+	async function listAllFiles(path: string, readdirFn: typeof promises.readdir): Promise<string[]> {
+		const stats = await readdirFn(path, { withFileTypes: true, recursive: true });
+		const result: string[] = [];
+		for (const stat of stats) {
+			ok(typeof stat !== "string");
+			const filePath = join(path, stat.name);
+			if (stat.isDirectory()) {
+				result.push(...(await listAllFiles(filePath, readdirFn)));
+			} else if (stat.isFile()) {
+				result.push(filePath);
+			}
+		}
+		return result.map((file) => file.replace(path, "")).filter(fileFilter);
+	}
+
+	async function compareTwoFiles(rel: string) {
+		const internalPath = join(internalDir, rel);
+		const externalPath = join(externalDir, rel);
+		const [internalContent, externalContent] = await Promise.all([
+			promises.readFile(internalPath).catch(() => ""),
+			externalFS.promises.readFile(externalPath).catch(() => ""),
+		]);
+		if (!isEqual(internalContent, externalContent))
+			return {
+				internalContent,
+				externalContent,
+			};
+	}
+
+	async function initialize() {
+		logger("initializing");
+		await externalFS.promises.mkdir(externalDir, { recursive: true });
+		const externalFiles = await listAllFiles(externalDir, externalFS.promises.readdir);
+		logger("found %d files in %s (external)", externalFiles.length, externalDir);
+		for (const file of externalFiles) {
+			logger("copying %s (external) to %s (internal)", externalDir + file, internalDir + file);
+			const externalPath = externalDir + file;
+			const internalPath = internalDir + file;
+			const externalContent = await externalFS.promises.readFile(externalPath);
+			await promises.mkdir(dirname(internalPath), { recursive: true });
+			await promises.writeFile(internalPath, externalContent);
+			logger("copied %s", basename(internalPath));
+		}
+	}
+
+	await initialize();
+	logger("initialized");
+
+	const internalCooldown: string[] = [];
+	const externalCooldown: string[] = [];
+
+	const internalWatcher = watch(internalDir, { recursive: true }, async (change, affected) => {
+		logger(">> internal event: %s %s", change, affected);
+		const rel = affected.replace(internalDir, "").replace(/^\//, "");
+		const internalPath = join(internalDir, rel);
+		const externalPath = join(externalDir, rel);
+
+		if (!fileFilter(rel)) return;
+
+		if (change === "change") {
+			setTimeout(async () => {
+				if (externalCooldown.includes(rel)) {
+					externalCooldown.splice(externalCooldown.indexOf(rel), 1);
+					return;
+				}
+				const diff = await compareTwoFiles(rel);
+				if (diff) {
+					internalCooldown.push(rel);
+					logger("syncing %s to %s", internalPath, externalPath);
+					await externalFS.promises.mkdir(dirname(externalPath), { recursive: true });
+					await externalFS.promises.writeFile(externalPath, diff.internalContent);
+				}
+			});
+		}
+
+		if (change === "rename") {
+			setTimeout(async () => {
+				const existsInInternal = await promises.exists(internalPath);
+				const existsInExternal = externalFS.existsSync(externalPath);
+				if (!existsInInternal && existsInExternal) {
+					logger("deleting %s (external)", externalPath);
+					await externalFS.promises.rm(externalPath).catch(() => {});
+				}
+			}, 100);
+		}
+	});
+
+	const externalWatcher = externalFS.watch(externalDir, { recursive: true }, async (change, affected) => {
+		logger(">> external event: %s %s", change, affected);
+		const rel = affected.replace(externalDir, "").replace(/^\//, "");
+		const internalPath = join(internalDir, rel);
+		const externalPath = join(externalDir, rel);
+
+		if (!fileFilter(rel)) return;
+
+		if (change === "change") {
+			setTimeout(async () => {
+				if (internalCooldown.includes(rel)) {
+					internalCooldown.splice(internalCooldown.indexOf(rel), 1);
+					return;
+				}
+				const diff = await compareTwoFiles(rel);
+				console.log(diff);
+				if (diff) {
+					externalCooldown.push(rel);
+					logger("syncing %s to %s", externalPath, internalPath);
+					await promises.mkdir(dirname(internalPath), { recursive: true });
+					await promises.writeFile(internalPath, diff.externalContent);
+				}
+			});
+		}
+
+		if (change === "rename") {
+			setTimeout(async () => {
+				const existsInInternal = await promises.exists(internalPath);
+				const existsInExternal = externalFS.existsSync(externalPath);
+				if (!existsInExternal && existsInInternal) {
+					logger("deleting %s (internal)", internalPath);
+					await promises.rm(internalPath, undefined).catch(() => {});
+				}
+			}, 100);
+		}
+	});
+
+	return {
+		internalWatcher,
+		externalWatcher,
+		close: () => {
+			internalWatcher.close();
+			externalWatcher.close();
+		},
+	};
 }

@@ -8,7 +8,6 @@ WebAssembly and SharedArrayBuffer IO. Pronounced "wassabee-yo".
   - [Initialization](#initialization)
     - [From New Memory](#from-new-memory)
     - [From Existing Memory](#from-existing-memory)
-  - [Webpack Plugin](#webpack-plugin)
 
 ## Purpose
 
@@ -114,12 +113,3 @@ addEventListener("message", async ({ data }) => {
 
 In this case, `reboot` signifies that the library is being initialized from cold
 storage and thread-local state should be reset.
-
-### Webpack Plugin
-
-A Webpack plugin is provided to allow for seamless integration of `wasabio` into
-any project. The plugin currently supports generating a WASM memory that can be
-used to boot the library on the main thread with.
-
-If you are not interested in using the Webpack plugin, you may opt out of its
-dependencies being installed by using `npm install wasabio --omit=optional`.

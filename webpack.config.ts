@@ -6,7 +6,6 @@ import childProcess from "child_process";
 import CopyPlugin from "copy-webpack-plugin";
 import TerserPlugin from "terser-webpack-plugin";
 import ShellPlugin from "webpack-shell-plugin-next";
-import NodeExternals from "webpack-node-externals";
 
 const OUT_DIR = path.resolve("dist");
 fs.rmSync(OUT_DIR, { recursive: true, force: true });
@@ -124,179 +123,182 @@ function buildWithWasmPack(webpackMode: string) {
 	fs.writeFileSync("pkg/package.json", JSON.stringify(pkjJson, null, 2));
 }
 
-export default [
-	function wasabioLibrary(_env: unknown, { mode }: { mode: string }) {
-		const isProduction = mode === "production";
+function wasabioBrowserLibrary(_env: unknown, { mode }: { mode: string }) {
+	const isProduction = mode === "production";
 
-		const config: webpack.Configuration = {
-			mode: isProduction ? "production" : "development",
-			entry: "./src/index.ts",
-			devtool: isProduction ? false : "inline-source-map",
-			output: {
-				path: OUT_DIR,
-				library: {
-					commonjs: "wasabio",
-					amd: "wasabio",
-					root: "WASABIO",
-				},
-				libraryTarget: "umd",
-				umdNamedDefine: true,
-				globalObject: `(typeof self !== 'undefined' ? self : this)`,
-				filename: "index.js",
+	const config: webpack.Configuration = {
+		mode: isProduction ? "production" : "development",
+		target: "web",
+		entry: "./src/index.ts",
+		devtool: isProduction ? false : "inline-source-map",
+		output: {
+			path: OUT_DIR,
+			library: {
+				commonjs: "wasabio",
+				amd: "wasabio",
+				root: "WASABIO",
 			},
-			node: {
-				global: false,
-				__filename: false,
-				__dirname: false,
-			},
-			watchOptions: {
-				ignored: [OUT_DIR],
-			},
-			optimization: {
-				nodeEnv: false,
-				minimize: mode === "production",
-				minimizer: [
-					new TerserPlugin({
-						extractComments: false,
-						terserOptions: {
-							format: {
-								comments: false,
-							},
+			libraryTarget: "umd",
+			umdNamedDefine: true,
+			globalObject: `(typeof self !== 'undefined' ? self : this)`,
+			filename: "index.browser.js",
+		},
+		node: {
+			global: false,
+			__filename: false,
+			__dirname: false,
+		},
+		watchOptions: {
+			ignored: [OUT_DIR],
+		},
+		optimization: {
+			nodeEnv: false,
+			minimize: mode === "production",
+			minimizer: [
+				new TerserPlugin({
+					extractComments: false,
+					terserOptions: {
+						format: {
+							comments: false,
 						},
-					}),
-				],
-			},
-			performance: {
-				hints: false,
-			},
-			plugins: [
-				new ShellPlugin({
-					safe: true,
-					onBuildStart: {
-						blocking: true,
-						scripts: [
-							"mkdir -p deps",
-							installWasiSDK,
-							installEmccSDK,
-							installWasmBindgen,
-							buildWithWasmPack.bind(null, mode),
-						],
 					},
-					onAfterDone: {
-						blocking: false,
-						scripts: [
-							[
-								"npx dts-bundle-generator",
-								"--export-referenced-types=false",
-								"--umd-module-name=wasabio",
-								"-o dist/index.d.ts",
-								"src/index.ts",
-							].join(" "),
-						],
-					},
-				}),
-				new webpack.ProvidePlugin({
-					Buffer: ["buffer", "Buffer"],
-					process: "process",
-					URL: ["url", "URL"],
-				}),
-				new CopyPlugin({
-					patterns: [
-						{ from: "LICENSE" },
-						{ from: "README.md" },
-						{
-							from: "package.json",
-							transform: (content) => {
-								const pkgJson = JSON.parse(content.toString());
-								delete pkgJson.devDependencies;
-								delete pkgJson.prettier;
-								delete pkgJson.scripts;
-								delete pkgJson.private;
-								delete pkgJson.type;
-								pkgJson.main = "./index.js";
-								pkgJson.types = "./index.d.ts";
-								return JSON.stringify(pkgJson, null, 2);
-							},
-						},
-					],
 				}),
 			],
-			module: {
-				rules: [
+		},
+		performance: {
+			hints: false,
+		},
+		plugins: [
+			new ShellPlugin({
+				safe: true,
+				onBuildStart: {
+					blocking: true,
+					scripts: [
+						"mkdir -p deps",
+						installWasiSDK,
+						installEmccSDK,
+						installWasmBindgen,
+						buildWithWasmPack.bind(null, mode),
+					],
+				},
+				onAfterDone: {
+					blocking: false,
+					scripts: [
+						[
+							"npx dts-bundle-generator",
+							"--export-referenced-types=false",
+							"--umd-module-name=wasabio",
+							"-o dist/index.d.ts",
+							"src/index.ts",
+						].join(" "),
+					],
+				},
+			}),
+			new webpack.ProvidePlugin({
+				Buffer: ["buffer", "Buffer"],
+				process: "process",
+				URL: ["url", "URL"],
+			}),
+			new CopyPlugin({
+				patterns: [
+					{ from: "LICENSE" },
+					{ from: "README.md" },
 					{
-						test: /\.[jt]sx?$/,
-						loader: "ts-loader",
-						options: {
-							transpileOnly: false,
-						},
-					},
-					{
-						test: /wasabio\.js$/,
-						loader: "string-replace-loader",
-						options: {
-							search: "input = new URL('wasabio_bg.wasm', import.meta.url);",
-							replace: "throw new Error('no default wasm binary bundled.');",
-							strict: true,
-						},
-					},
-					{
-						test: /\.wasm$/,
-						loader: "url-loader",
-						options: {
-							mimetype: "delete/me",
-							limit: 15 * 1024 * 1024,
-							// this removes the "data:<whatever>;base64," from the bundle
-							generator: (content: Buffer) => content.toString("base64"),
+						from: "package.json",
+						transform: (content) => {
+							const pkgJson = JSON.parse(content.toString());
+							delete pkgJson.devDependencies;
+							delete pkgJson.prettier;
+							delete pkgJson.scripts;
+							delete pkgJson.private;
+							delete pkgJson.type;
+							pkgJson.main = "./index.native.js";
+							pkgJson.browser = "./index.browser.js";
+							pkgJson.types = "./index.d.ts";
+							return JSON.stringify(pkgJson, null, 2);
 						},
 					},
 				],
-			},
-			resolve: {
-				extensions: [".tsx", ".ts", ".jsx", ".js", ".json"],
-				fallback: {
-					fs: false,
-					url: require.resolve("url/"),
-					path: require.resolve("path-browserify"),
-					stream: require.resolve("stream-browserify"),
+			}),
+		],
+		module: {
+			rules: [
+				{
+					test: /\.[jt]sx?$/,
+					loader: "ts-loader",
+					options: {
+						transpileOnly: false,
+					},
 				},
-				alias: {
-					assert: "assert",
-					buffer: "buffer",
-					process: "process",
+				{
+					test: /wasabio\.js$/,
+					loader: "string-replace-loader",
+					options: {
+						search: "input = new URL('wasabio_bg.wasm', import.meta.url);",
+						replace: "throw new Error('no default wasm binary bundled.');",
+						strict: true,
+					},
 				},
+				{
+					test: /\.wasm$/,
+					loader: "url-loader",
+					options: {
+						mimetype: "delete/me",
+						limit: 15 * 1024 * 1024,
+						// this removes the "data:<whatever>;base64," from the bundle
+						generator: (content: Buffer) => content.toString("base64"),
+					},
+				},
+			],
+		},
+		resolve: {
+			extensions: [".tsx", ".ts", ".jsx", ".js", ".json"],
+			fallback: {
+				fs: false,
+				url: require.resolve("url/"),
+				path: require.resolve("path-browserify"),
+				stream: require.resolve("stream-browserify"),
 			},
-		};
+			alias: {
+				assert: "assert",
+				buffer: "buffer",
+				process: "process",
+			},
+		},
+	};
 
-		return config;
-	},
-	function wasabioPlugin(_env: unknown, { mode }: { mode: string }) {
-		const isProduction = mode === "production";
-		return {
-			mode: isProduction ? "production" : "development",
-			entry: "./src/plugin.ts",
-			output: {
-				path: OUT_DIR,
-				filename: "plugin.js",
-			},
-			target: "node",
-			devtool: isProduction ? false : "inline-source-map",
-			externalsPresets: { node: true },
-			externals: [NodeExternals(), { "wasabio-external": "commonjs wasabio" }],
-			plugins: [new webpack.NormalModuleReplacementPlugin(/src\/index\.ts$/, "redirect.ts")],
-			module: {
-				rules: [
-					{
-						test: /\.[jt]sx?$/,
-						loader: "ts-loader",
-						options: {
-							transpileOnly: false,
-						},
-					},
-				],
-			},
-			resolve: {
-				extensions: [".tsx", ".ts", ".jsx", ".js", ".json"],
-			},
-		} as webpack.Configuration;
-	},
-];
+	return config;
+}
+
+function wasabioNativeLibrary(_env: unknown, { mode }: { mode: string }) {
+	const browserConfig = wasabioBrowserLibrary(_env, { mode });
+	browserConfig.target = "node";
+	// remove buffer alias
+	// @ts-expect-error
+	delete browserConfig.resolve.alias.buffer;
+	// remove stream fallback
+	// @ts-expect-error
+	delete browserConfig.resolve.fallback.stream;
+	// change the output filename
+	// @ts-expect-error
+	browserConfig.output.filename = "index.native.js";
+	// remove the Copy plugin
+	// @ts-expect-error
+	browserConfig.plugins.pop();
+	// replace the Provide plugin with one that does not override Buffer
+	// @ts-expect-error
+	browserConfig.plugins.pop();
+	// @ts-expect-error
+	browserConfig.plugins.push(
+		new webpack.ProvidePlugin({
+			process: "process",
+			URL: ["url", "URL"],
+		}),
+	);
+	// remove the shell plugin
+	// @ts-expect-error
+	browserConfig.plugins.shift();
+	return browserConfig;
+}
+
+export default [wasabioBrowserLibrary, wasabioNativeLibrary];
