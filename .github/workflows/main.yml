@@ -15,7 +15,7 @@ jobs:
       - uses: bahmutov/npm-install@v1
       - name: prepare rust
         run: |
-          export RUST_TOOLCHAIN=$(cat rust-toolchain)
+          export RUST_TOOLCHAIN=$(grep '^channel' rust-toolchain | cut -d'"' -f2)
           rustup target add wasm32-wasi --toolchain ${RUST_TOOLCHAIN}
           rustup target add wasm32-unknown-unknown --toolchain ${RUST_TOOLCHAIN}
           rustup component add rustfmt --toolchain ${RUST_TOOLCHAIN}
