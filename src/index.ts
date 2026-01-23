@@ -1169,3 +1169,5 @@ export async function mirror(opts: MirrorOptions): Promise<MirrorOutput> {
 		},
 	};
 }
+
+export { setUnsafe } from "../pkg"

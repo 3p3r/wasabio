@@ -16,6 +16,13 @@ use std::ffi::{c_void, CStr, CString};
 use std::sync::Once;
 use wasm_bindgen::{JsError, JsValue};
 
+static mut LFS_UNSAFE: bool = false;
+pub fn lfs_set_unsafe(unsafe_: bool) {
+    unsafe {
+        LFS_UNSAFE = unsafe_;
+    }
+}
+
 /// multiple workers may be competing to initially mount the filesystem, this
 /// lock ensures that only one worker does the work and the others wait for it.
 static mut LFS_SYS_INIT_LOCK: Lazy<Lock> = Lazy::new(|| Lock::new().unwrap());
@@ -25,14 +32,23 @@ static INIT: Once = Once::new();
 static mut LFS_SYS_DISK_LOCK: Lazy<Lock> = Lazy::new(|| Lock::new().unwrap());
 /// LittleFS calls this function to lock the disk.
 unsafe extern "C" fn lock() {
+    if LFS_UNSAFE {
+        return;
+    }
     LFS_SYS_DISK_LOCK.acquire();
 }
 /// LittleFS calls this function to unlock the disk.
 unsafe extern "C" fn unlock() {
+    if LFS_UNSAFE {
+        return;
+    }
     LFS_SYS_DISK_LOCK.release();
 }
 
 pub unsafe fn lfs_locked() -> bool {
+    if LFS_UNSAFE {
+        return false;
+    }
     LFS_SYS_DISK_LOCK.held()
 }
 

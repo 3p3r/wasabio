@@ -59,6 +59,11 @@ fn path_from_fd(fd: usize) -> String {
 }
 
 #[wasm_bindgen]
+pub fn setUnsafe(enable: bool) {
+    lfs::lfs_set_unsafe(enable);
+}
+
+#[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(typescript_type = "string | Uint8Array")]
     pub type UnionStringUint8Array;
