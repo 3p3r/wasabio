@@ -927,7 +927,19 @@ export const watch: typeof fs.watch = (filename, ...args): Watcher => {
 	const _filename = normalizePathLikeToString(filename);
 	const watcher = new Watcher(_filename, listener);
 	watcher.on("change", listener as any);
-	const _listener = (event: string, file: string) => {
+	const _watchListener = (path: string, prevStat?: Partial<fs.Stats>, currStat?: Partial<fs.Stats>) => {
+		const eventType = !prevStat || !currStat ? "rename" : "change";
+		if (opts.recursive) {
+			if (path?.startsWith(_filename)) {
+				listener(eventType, path);
+			}
+		} else {
+			if (path === _filename) {
+				listener(eventType, path);
+			}
+		}
+	};
+	const _changeRenameListener = (event: string, file: string) => {
 		if (opts.recursive) {
 			if (file.startsWith(_filename)) {
 				watcher.emit("change", event, file);
@@ -938,11 +950,13 @@ export const watch: typeof fs.watch = (filename, ...args): Watcher => {
 			}
 		}
 	};
-	const _c = _listener.bind(null, "change");
-	const _r = _listener.bind(null, "rename");
+	const _c = _changeRenameListener.bind(null, "change");
+	const _r = _changeRenameListener.bind(null, "rename");
+	fileSystemSharedEmitter.get().on("watch_", _watchListener);
 	fileSystemSharedEmitter.get().on("change", _c);
 	fileSystemSharedEmitter.get().on("rename", _r);
 	return watcher.once("close", () => {
+		fileSystemSharedEmitter.get().off("watch_", _watchListener);
 		fileSystemSharedEmitter.get().off("change", _c);
 		fileSystemSharedEmitter.get().off("rename", _r);
 	});
@@ -1170,4 +1184,4 @@ export async function mirror(opts: MirrorOptions): Promise<MirrorOutput> {
 	};
 }
 
-export { setUnsafe } from "../pkg"
+export { setUnsafe } from "../pkg";
